@@ -31,7 +31,11 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# local backups (tarballs include .env — never commit these)
+_backups/
 
 # typescript
 *.tsbuildinfo
