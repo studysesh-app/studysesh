@@ -27,7 +27,7 @@ interface UseAuthReturn {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: string | null; needsVerification: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null; needsProfile: boolean }>;
   verifyOtp: (email: string, token: string) => Promise<{ error: string | null }>;
   resendOtp: (email: string) => Promise<{ error: string | null }>;
@@ -177,31 +177,33 @@ export function useAuth(): UseAuthReturn {
   };
 
   // Sign up with email + password
-  const signUp = useCallback(async (email: string, password: string): Promise<{ error: string | null }> => {
+  const signUp = useCallback(async (email: string, password: string): Promise<{ error: string | null; needsVerification: boolean }> => {
     if (DEMO_MODE) {
       pendingDemoSignups.add(email.trim().toLowerCase());
-      return { error: null };
+      return { error: null, needsVerification: true };
     }
 
     const emailError = validateEmail(email);
-    if (emailError) return { error: emailError };
+    if (emailError) return { error: emailError, needsVerification: false };
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
     });
 
     if (error) {
       if (error.message.includes('already registered')) {
-        return { error: 'This email is already registered. Try signing in.' };
+        return { error: 'This email is already registered. Try signing in.', needsVerification: false };
       }
       if (error.message.includes('password')) {
-        return { error: 'Password must be at least 6 characters.' };
+        return { error: 'Password must be at least 6 characters.', needsVerification: false };
       }
-      return { error: error.message };
+      return { error: error.message, needsVerification: false };
     }
 
-    return { error: null };
+    // If the project auto-confirms signups, Supabase already returns an active session —
+    // no OTP email was sent, so skip straight past the code-verification screen.
+    return { error: null, needsVerification: !data.session };
   }, []);
 
   // Verify OTP code (email confirmation)

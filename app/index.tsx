@@ -1086,7 +1086,7 @@ export default function App() {
                         onBack={() => setOnboardingScreen('role-selection')}
                         onSignUp={async (email, password) => {
                             setAuthLoading(true);
-                            const { error } = await auth.signUp(email, password);
+                            const { error, needsVerification } = await auth.signUp(email, password);
                             setAuthLoading(false);
                             if (error) {
                                 Alert.alert('Sign Up Error', error);
@@ -1095,7 +1095,8 @@ export default function App() {
                             setOnboardingEmail(email);
                             setOnboardingPassword(password);
                             setUserRole(selectedOnboardingRole || 'student');
-                            setOnboardingScreen('code-verification');
+                            // Auto-confirmed projects already return an active session — skip the email code step.
+                            setOnboardingScreen(needsVerification ? 'code-verification' : 'profile-basics');
                         }}
                         onSignInLink={() => setOnboardingScreen('sign-in')}
                     />
