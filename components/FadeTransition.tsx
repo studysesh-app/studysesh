@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
-import { StyleSheet, ViewStyle } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, ViewStyle } from 'react-native';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
     withTiming,
+    runOnJS,
     Easing,
 } from 'react-native-reanimated';
 
@@ -23,9 +24,13 @@ export function FadeTransition({
     zIndex = 1
 }: FadeTransitionProps) {
     const opacity = useSharedValue(isVisible ? 1 : 0);
+    // Fully unmount hidden screens once their fade-out finishes — relying on
+    // pointerEvents/CSS alone let invisible screens keep intercepting taps on web.
+    const [shouldRender, setShouldRender] = useState(isVisible);
 
     useEffect(() => {
         if (isVisible) {
+            setShouldRender(true);
             // Enter fast
             opacity.value = withTiming(1, {
                 duration: duration,
@@ -36,6 +41,8 @@ export function FadeTransition({
             opacity.value = withTiming(0, {
                 duration: duration * 3,
                 easing: Easing.inOut(Easing.ease),
+            }, (finished) => {
+                if (finished) runOnJS(setShouldRender)(false);
             });
         }
     }, [isVisible, duration]);
@@ -44,18 +51,14 @@ export function FadeTransition({
         opacity: opacity.value,
     }));
 
+    if (!shouldRender) return null;
+
     return (
-        <Animated.View
-            style={[
-                styles.container,
-                { zIndex },
-                animatedStyle,
-                style
-            ]}
-            pointerEvents={isVisible ? 'auto' : 'none'}
-        >
-            {children}
-        </Animated.View>
+        <View style={[styles.container, { zIndex }]} pointerEvents={isVisible ? 'auto' : 'none'}>
+            <Animated.View style={[styles.container, animatedStyle, style]}>
+                {children}
+            </Animated.View>
+        </View>
     );
 }
 

@@ -2,7 +2,7 @@ import { View, Text, TouchableOpacity, ScrollView, Dimensions } from 'react-nati
 import { ArrowLeft, Plus, X } from 'lucide-react-native';
 import { useState } from 'react';
 import { CourseChip } from '../CourseChip';
-import { CourseInputModal } from './CourseInputModal';
+import { CourseInputModal, ProofFile } from './CourseInputModal';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 import { AnimatedTabs, TabData } from '../../reference/AnimatedTabs';
@@ -15,7 +15,7 @@ interface MyCoursesScreenProps {
     isTutor: boolean;
     onBack: () => void;
     onSave: (courses: string[]) => void;
-    onSaveTutoring?: (courses: string[]) => void;
+    onSaveTutoring?: (courses: string[], proofUris?: Record<string, string>) => void;
     isDarkMode?: boolean;
 }
 
@@ -32,6 +32,7 @@ export function MyCoursesScreen({
     const activeList = activeTabIndex === 0 ? 'studying' : 'tutoring';
     const [coursesStudying, setCoursesStudying] = useState<string[]>(initialCourses);
     const [coursesTutoring, setCoursesTutoring] = useState<string[]>(initialTutoringCourses);
+    const [proofUris, setProofUris] = useState<Record<string, string>>({});
     const [showAddModal, setShowAddModal] = useState(false);
 
     // Tabs for AnimatedTabs (matching CourseDetailScreen pattern exactly)
@@ -71,14 +72,14 @@ export function MyCoursesScreen({
         // We'll call both available callbacks with current state
         onSave(coursesStudying);
         if (onSaveTutoring) {
-            onSaveTutoring(coursesTutoring);
+            onSaveTutoring(coursesTutoring, proofUris);
         }
 
         onBack(); // Or just give feedback? Usually save closes the screen.
     };
 
-    const handleProofUpload = (file: any) => {
-        console.log('Proof uploaded:', file.name);
+    const handleProofUpload = (file: ProofFile) => {
+        setProofUris((prev) => ({ ...prev, [file.courseCode]: file.uri }));
     };
 
     // Swipe gesture handler
@@ -111,7 +112,7 @@ export function MyCoursesScreen({
 
     return (
         <GestureDetector gesture={swipeGesture}>
-            <Animated.View className={`flex-1 ${isDarkMode ? 'bg-gray-900' : 'bg-white'}`} style={animatedStyle}>
+            <Animated.View style={[{ flex: 1, backgroundColor: isDarkMode ? '#111827' : '#fff' }, animatedStyle]}>
                 <ScrollView className="flex-1 px-4 pt-6">
                     <View className="flex-row items-center mb-6 relative">
                         <TouchableOpacity onPress={onBack} className="absolute left-0 z-10 p-2 -ml-2">

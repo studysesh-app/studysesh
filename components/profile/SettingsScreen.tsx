@@ -12,6 +12,8 @@ interface SettingsScreenProps {
     theme: 'light' | 'dark';
     onBack: () => void;
     onChangePassword: () => void;
+    onChangeEmail: () => void;
+    onDeleteAccount: () => void;
     onBlockedUsers: () => void;
     onPrivacyPolicy: () => void;
     onTermsOfService: () => void;
@@ -26,6 +28,8 @@ export function SettingsScreen({
     theme,
     onBack,
     onChangePassword,
+    onChangeEmail,
+    onDeleteAccount,
     onBlockedUsers,
     onPrivacyPolicy,
     onTermsOfService,
@@ -64,7 +68,7 @@ export function SettingsScreen({
     return (
         <View style={{ flex: 1, backgroundColor: 'transparent' }}>
             <GestureDetector gesture={swipeGesture}>
-                <Animated.View className={`flex-1 ${theme === 'dark' ? 'bg-gray-900' : 'bg-white'}`} style={animatedStyle}>
+                <Animated.View style={[{ flex: 1, backgroundColor: theme === 'dark' ? '#111827' : '#fff' }, animatedStyle]}>
                     <ScrollView className="flex-1 px-4 pt-6">
                         <View className="flex-row items-center mb-6 relative">
                             <TouchableOpacity onPress={onBack} className="absolute left-0 z-10 p-2 -ml-2">
@@ -90,7 +94,7 @@ export function SettingsScreen({
                                             {email}
                                         </Text>
                                     </View>
-                                    <TouchableOpacity onPress={() => alert('Change email flow')}>
+                                    <TouchableOpacity onPress={onChangeEmail}>
                                         <Text className="text-red-600 text-sm font-medium">
                                             Change
                                         </Text>
@@ -207,7 +211,7 @@ export function SettingsScreen({
                                             'Are you sure you want to delete your account? This action cannot be undone.',
                                             [
                                                 { text: 'Cancel', style: 'cancel' },
-                                                { text: 'Delete', style: 'destructive', onPress: () => alert('Delete account flow') }
+                                                { text: 'Delete', style: 'destructive', onPress: onDeleteAccount }
                                             ]
                                         );
                                     }}

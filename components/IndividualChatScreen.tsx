@@ -102,7 +102,7 @@ export function IndividualChatScreen({
     return (
         <View style={{ flex: 1, backgroundColor: 'transparent' }}>
             <GestureDetector gesture={swipeGesture}>
-                <Animated.View className={`flex-1 ${isDarkMode ? 'bg-gray-900' : 'bg-white'}`} style={animatedStyle}>
+                <Animated.View style={[{ flex: 1, backgroundColor: isDarkMode ? '#111827' : '#fff' }, animatedStyle]}>
                     {/* Header - Gradient Fade */}
                     <View className="absolute top-0 left-0 right-0 z-20">
                         {/* Gradient Background Layer - Independent of content */}

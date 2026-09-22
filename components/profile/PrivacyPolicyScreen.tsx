@@ -42,7 +42,7 @@ export function PrivacyPolicyScreen({ onBack, isDarkMode = false }: PrivacyPolic
     return (
         <View style={{ flex: 1, backgroundColor: 'transparent' }}>
             <GestureDetector gesture={swipeGesture}>
-                <Animated.View className={`flex-1 ${isDarkMode ? 'bg-gray-900' : 'bg-white'}`} style={animatedStyle}>
+                <Animated.View style={[{ flex: 1, backgroundColor: isDarkMode ? '#111827' : '#fff' }, animatedStyle]}>
                     <ScrollView className="flex-1 px-4 pt-6">
                         <View className="flex-row items-center mb-6 relative">
                             <TouchableOpacity onPress={onBack} className="absolute left-0 z-10 p-2 -ml-2">

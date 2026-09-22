@@ -65,7 +65,7 @@ export function NotificationsScreen({ notifications, onBack, onMarkAsRead, onNot
     return (
         <View style={{ flex: 1, backgroundColor: 'transparent' }}>
             <GestureDetector gesture={swipeGesture}>
-                <Animated.View className="flex-1 bg-white dark:bg-gray-900" style={animatedStyle}>
+                <Animated.View style={[{ flex: 1, backgroundColor: '#fff' }, animatedStyle]}>
                 <ScrollView className="flex-1 px-4 pt-6">
                     {/* Header matching SettingsScreen */}
                     <View className="flex-row items-center mb-6 relative">

@@ -35,6 +35,23 @@ interface UseAuthReturn {
   signOut: () => Promise<void>;
   createProfile: (profileData: CreateProfileData) => Promise<{ error: string | null }>;
   fetchProfile: () => Promise<UserProfile | null>;
+  updateProfile: (updates: UpdateProfileData) => Promise<{ error: string | null }>;
+  updatePassword: (currentPassword: string, newPassword: string) => Promise<{ error: string | null }>;
+  updateEmail: (currentPassword: string, newEmail: string) => Promise<{ error: string | null }>;
+  deleteAccount: () => Promise<{ error: string | null }>;
+}
+
+interface UpdateProfileData {
+  name?: string;
+  pronouns?: string[];
+  gender?: string;
+  year?: string;
+  degreeLevel?: string;
+  major?: string;
+  bio?: string;
+  profileVisibility?: 'everyone' | 'women-nb-only';
+  photoUrl?: string | null;
+  prompts?: Array<{ prompt: string; answer: string }>;
 }
 
 interface CreateProfileData {
@@ -453,6 +470,109 @@ export function useAuth(): UseAuthReturn {
     }
   }, [fetchProfile, session]);
 
+  // Update the current user's profile (edit-profile screen)
+  const updateProfile = useCallback(async (updates: UpdateProfileData): Promise<{ error: string | null }> => {
+    if (DEMO_MODE) {
+      if (demoProfileStore) {
+        demoProfileStore = {
+          ...demoProfileStore,
+          ...(updates.name !== undefined && { name: updates.name }),
+          ...(updates.pronouns !== undefined && { pronouns: updates.pronouns }),
+          ...(updates.gender !== undefined && { gender: updates.gender }),
+          ...(updates.year !== undefined && { year: updates.year }),
+          ...(updates.degreeLevel !== undefined && { degree_level: updates.degreeLevel }),
+          ...(updates.major !== undefined && { major: updates.major }),
+          ...(updates.bio !== undefined && { bio: updates.bio }),
+          ...(updates.profileVisibility !== undefined && { profile_visibility: updates.profileVisibility }),
+          ...(updates.photoUrl !== undefined && { photo_url: updates.photoUrl }),
+        };
+        setProfile(demoProfileStore);
+      }
+      return { error: null };
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: 'Not authenticated' };
+
+    const patch: Record<string, any> = {};
+    if (updates.name !== undefined) patch.name = updates.name;
+    if (updates.pronouns !== undefined) patch.pronouns = updates.pronouns;
+    if (updates.gender !== undefined) patch.gender = updates.gender;
+    if (updates.year !== undefined) patch.year = updates.year;
+    if (updates.degreeLevel !== undefined) patch.degree_level = updates.degreeLevel;
+    if (updates.major !== undefined) patch.major = updates.major;
+    if (updates.bio !== undefined) patch.bio = updates.bio;
+    if (updates.profileVisibility !== undefined) patch.profile_visibility = updates.profileVisibility;
+    if (updates.photoUrl !== undefined) patch.photo_url = updates.photoUrl;
+
+    if (Object.keys(patch).length > 0) {
+      const { error } = await supabase.from('users').update(patch).eq('id', user.id);
+      if (error) return { error: error.message };
+    }
+
+    if (updates.prompts) {
+      await supabase.from('user_prompts').delete().eq('user_id', user.id);
+      if (updates.prompts.length > 0) {
+        const { error: promptsError } = await supabase.from('user_prompts').insert(
+          updates.prompts.map((p, i) => ({ user_id: user.id, prompt: p.prompt, answer: p.answer, sort_order: i }))
+        );
+        if (promptsError) return { error: promptsError.message };
+      }
+    }
+
+    const newProfile = await fetchProfile();
+    setProfile(newProfile);
+    return { error: null };
+  }, [fetchProfile]);
+
+  // Change password (re-authenticates with the current password first)
+  const updatePassword = useCallback(async (currentPassword: string, newPassword: string): Promise<{ error: string | null }> => {
+    if (DEMO_MODE) {
+      return { error: null };
+    }
+
+    const email = session?.user?.email;
+    if (email) {
+      const { error: reauthError } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+      if (reauthError) return { error: 'Current password is incorrect.' };
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) return { error: error.message };
+    return { error: null };
+  }, [session]);
+
+  // Change email (re-authenticates with the current password first; Supabase sends a confirmation link to the new address)
+  const updateEmail = useCallback(async (currentPassword: string, newEmail: string): Promise<{ error: string | null }> => {
+    if (DEMO_MODE) {
+      return { error: null };
+    }
+
+    const email = session?.user?.email;
+    if (email) {
+      const { error: reauthError } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+      if (reauthError) return { error: 'Current password is incorrect.' };
+    }
+
+    const { error } = await supabase.auth.updateUser({ email: newEmail.trim().toLowerCase() });
+    if (error) return { error: error.message };
+    return { error: null };
+  }, [session]);
+
+  // Permanently delete the account (via edge function, since deleting an auth user requires the service role)
+  const deleteAccount = useCallback(async (): Promise<{ error: string | null }> => {
+    if (DEMO_MODE) {
+      await signOut();
+      return { error: null };
+    }
+
+    const { error } = await supabase.functions.invoke('delete-account');
+    if (error) return { error: error.message };
+
+    await signOut();
+    return { error: null };
+  }, [signOut]);
+
   return {
     session,
     user,
@@ -466,5 +586,9 @@ export function useAuth(): UseAuthReturn {
     signOut,
     createProfile,
     fetchProfile,
+    updateProfile,
+    updatePassword,
+    updateEmail,
+    deleteAccount,
   };
 }

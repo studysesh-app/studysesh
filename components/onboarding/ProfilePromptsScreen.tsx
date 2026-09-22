@@ -408,8 +408,8 @@ export function ProfilePromptsScreen({ onBack, onContinue }: ProfilePromptsScree
                                     bottom: 0,
                                     opacity: listOpacity,
                                     transform: [{ translateX: listTranslateX }],
+                                    pointerEvents: sheetView === 'list' ? 'auto' : 'none',
                                 }}
-                                pointerEvents={sheetView === 'list' ? 'auto' : 'none'}
                             >
                                 {/* Modal Header */}
                                 <View className="flex-row items-center justify-between px-4 pt-4 pb-3">
@@ -462,8 +462,8 @@ export function ProfilePromptsScreen({ onBack, onContinue }: ProfilePromptsScree
                                     bottom: 0,
                                     opacity: editOpacity,
                                     transform: [{ translateX: editTranslateX }],
+                                    pointerEvents: sheetView === 'edit' ? 'auto' : 'none',
                                 }}
-                                pointerEvents={sheetView === 'edit' ? 'auto' : 'none'}
                             >
                                 {/* Edit Header with back button */}
                                 <View className="flex-row items-center px-4 pt-4 pb-3">

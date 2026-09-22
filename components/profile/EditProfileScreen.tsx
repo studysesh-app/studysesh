@@ -394,7 +394,7 @@ export function EditProfileScreen({
     return (
         <>
             <GestureDetector gesture={swipeGesture}>
-                <AnimatedReanimated.View className={`flex-1 ${isDarkMode ? 'bg-gray-900' : 'bg-white'}`} style={animatedStyle}>
+                <AnimatedReanimated.View style={[{ flex: 1, backgroundColor: isDarkMode ? '#111827' : '#fff' }, animatedStyle]}>
                     <KeyboardAvoidingView
                         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                         className="flex-1"
@@ -734,8 +734,8 @@ export function EditProfileScreen({
                                     bottom: 0,
                                     opacity: listOpacity,
                                     transform: [{ translateX: listTranslateX }],
+                                    pointerEvents: sheetView === 'list' ? 'auto' : 'none',
                                 }}
-                                pointerEvents={sheetView === 'list' ? 'auto' : 'none'}
                             >
                                 <View className="flex-row items-center justify-between px-4 pt-4 pb-3">
                                     <Text className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
@@ -786,8 +786,8 @@ export function EditProfileScreen({
                                     bottom: 0,
                                     opacity: editOpacity,
                                     transform: [{ translateX: editTranslateX }],
+                                    pointerEvents: sheetView === 'edit' ? 'auto' : 'none',
                                 }}
-                                pointerEvents={sheetView === 'edit' ? 'auto' : 'none'}
                             >
                                 <View className="flex-row items-center px-4 pt-4 pb-3">
                                     <TouchableOpacity

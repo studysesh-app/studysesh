@@ -1,15 +1,21 @@
 import { View, Text, TextInput, TouchableOpacity, Modal, KeyboardAvoidingView, Platform, FlatList, ActivityIndicator } from 'react-native';
 import { X, Upload, Check, Search } from 'lucide-react-native';
 import { useState, useEffect, useCallback } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../lib/supabase';
 import { DEMO_MODE, searchCoursesDemo } from '../../lib/demo';
+
+export interface ProofFile {
+    uri: string;
+    courseCode: string;
+}
 
 interface CourseInputModalProps {
     isOpen: boolean;
     onClose: () => void;
     onAdd: (courseCode: string) => void;
     requiresProof?: boolean;
-    onProofUpload?: (file: any) => void;
+    onProofUpload?: (file: ProofFile) => void;
     isDarkMode?: boolean;
 }
 
@@ -74,9 +80,18 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
         setSuffix(numbers);
     };
 
-    const handleFileUpload = () => {
+    const handleFileUpload = async () => {
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            quality: 0.7,
+        });
+        if (result.canceled || !result.assets?.[0]) return;
+
+        const courseCode = selectedCourse?.code || (prefix.length >= 3 && suffix.length === 4 ? `${prefix} ${suffix}` : null);
+        if (!courseCode) return;
+
         if (onProofUpload) {
-            onProofUpload({ name: 'proof.pdf' });
+            onProofUpload({ uri: result.assets[0].uri, courseCode });
             setProofUploaded(true);
         }
     };

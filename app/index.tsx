@@ -4,6 +4,15 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
+import { useCourses } from '../hooks/useCourses';
+import { usePosts } from '../hooks/usePosts';
+import { useConnections } from '../hooks/useConnections';
+import { useActivity } from '../hooks/useActivity';
+import { useClassmates } from '../hooks/useClassmates';
+import { useChat } from '../hooks/useChat';
+import { uploadAvatar } from '../lib/storage';
+import { supabase } from '../lib/supabase';
+import { DEMO_MODE } from '../lib/demo';
 
 // Suppress SafeAreaView deprecation warning from Expo's internal packages
 // We've already migrated all our code to use react-native-safe-area-context
@@ -20,6 +29,7 @@ import { OnboardingToAppTransition } from '../components/OnboardingToAppTransiti
 import { ClassmatesScreen } from '../components/classmates/ClassmatesScreen';
 import { ActivityScreen } from '../components/activity/ActivityScreen';
 import { CourseDetailScreen } from '../components/courses/CourseDetailScreen';
+import { PostDetailScreen } from '../components/courses/PostDetailScreen';
 import { StudentHomeScreen } from '../components/home/StudentHomeScreen';
 
 // Tutor components
@@ -32,6 +42,7 @@ import { EditProfileScreen } from '../components/profile/EditProfileScreen';
 import { MyCoursesScreen } from '../components/profile/MyCoursesScreen';
 import { SettingsScreen } from '../components/profile/SettingsScreen';
 import { ChangePasswordScreen } from '../components/profile/ChangePasswordScreen';
+import { ChangeEmailScreen } from '../components/profile/ChangeEmailScreen';
 import { BlockedUsersScreen } from '../components/profile/BlockedUsersScreen';
 import { PrivacyPolicyScreen } from '../components/profile/PrivacyPolicyScreen';
 import { TermsOfServiceScreen } from '../components/profile/TermsOfServiceScreen';
@@ -58,7 +69,6 @@ import { ForgotPasswordScreen } from '../components/onboarding/ForgotPasswordScr
 import { PhoneInputScreen } from '../components/onboarding/PhoneInputScreen';
 import { StudentProfileScreen } from '../components/StudentProfileScreen';
 import { StudentProfileModal } from '../components/classmates/StudentProfileModal';
-import { getUserById, getUserByName } from '../components/mockData';
 
 type SocialTabValue = 'home' | 'classmates' | 'chat' | 'activity' | 'profile';
 type TutorTabValue = 'home' | 'connections' | 'chat' | 'activity' | 'profile';
@@ -71,6 +81,7 @@ type ProfileScreen =
     | 'notifications'
     | 'settings'
     | 'change-password'
+    | 'change-email'
     | 'blocked-users'
     | 'privacy-policy'
     | 'terms-of-service'
@@ -136,48 +147,50 @@ export default function App() {
         }
     }, [auth.loading, auth.session, auth.profile]);
 
+    const currentUserId = auth.profile?.id ?? null;
+    const courses = useCourses(currentUserId);
+    const connections = useConnections(currentUserId);
+    const activityFeed = useActivity(currentUserId);
+    const classmatesFeed = useClassmates(currentUserId);
+    const chat = useChat(currentUserId);
+
+    // Map real classmate profiles to the shape ClassmatesScreen/ActivityScreen/etc. expect.
+    const mockClassmates = classmatesFeed.classmates.map((c) => ({
+        id: c.id,
+        name: c.name,
+        pronouns: (c.pronouns ?? []).join('/').toLowerCase() || 'they/them',
+        year: c.year,
+        major: c.major,
+        gender: (c.gender ?? 'Prefer not to say') as 'Man' | 'Woman' | 'Non-Binary' | 'Prefer not to say',
+        photoUrl: c.photoUrl ?? undefined,
+        sharedCourses: c.sharedCourses,
+        prompts: c.prompts,
+    }));
+
     // --- Universal Profile Viewer State ---
     const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
     const [selectedProfileData, setSelectedProfileData] = useState<any>(null);
 
-    // Mock Profile Data for User (Tutor & Student Modes)
+    // Real profile data (single profile shared across student/tutor views since is_tutor is one flag on one profile)
     const studentProfile = {
-        name: 'Kshitij',
-        pronouns: 'He/Him',
-        year: '2nd Year',
-        program: 'Computer Science',
-        bio: 'Passionate about learning!',
-        photoUrl: null
+        name: auth.profile?.name ?? 'Student',
+        pronouns: (auth.profile?.pronouns ?? ['He', 'Him']).join('/'),
+        year: auth.profile?.year ?? '',
+        program: auth.profile?.major ?? '',
+        bio: auth.profile?.bio ?? '',
+        photoUrl: auth.profile?.photo_url ?? null,
     };
 
-    const tutorProfile = {
-        name: 'Kshitij',
-        pronouns: 'He/Him',
-        year: '3rd Year',
-        program: 'Computer Science',
-        bio: 'I help students ace their exams!',
-        photoUrl: null
-    };
+    const tutorProfile = studentProfile;
 
     const handleViewProfile = (profileId: string) => {
-        // Try to find the profile (using mockData utils)
-        let profile = getUserById(profileId);
-
+        // Search classmates first, then connections (accepted friends may no longer appear as "classmates")
+        let profile: any = mockClassmates.find((u) => u.id === profileId || u.name === profileId);
         if (!profile) {
-            // Fallback: try by name if ID fails
-            profile = getUserByName(profileId);
+            profile = connections.friendProfiles.find((u) => u.id === profileId || u.name === profileId);
         }
 
         if (profile) {
-            // Privacy Check
-            if (profile.privacy === 'hidden') {
-                Alert.alert(
-                    "Profile Unavailable",
-                    "This user has limited who can view their profile based on their visibility settings."
-                );
-                return;
-            }
-
             setSelectedProfileData(profile);
             setSelectedProfileId(profile.id);
         }
@@ -215,71 +228,66 @@ export default function App() {
         }
     }, [highlightedBookingId]);
     const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
+    const boardPosts = usePosts(selectedCourse, currentUserId);
+    const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+    const [postComments, setPostComments] = useState<Awaited<ReturnType<typeof boardPosts.fetchComments>>>([]);
+    const [courseTutors, setCourseTutors] = useState<Array<{ id: string; name: string; pronouns: string; groupPrice: string | null; individualPrice: string | null; location: string[] }>>([]);
+
+    // Fetch tutors for the currently-open course board
+    useEffect(() => {
+        if (DEMO_MODE || !selectedCourse) {
+            setCourseTutors([]);
+            return;
+        }
+        (async () => {
+            const { data: course } = await supabase.from('courses').select('id').eq('code', selectedCourse).single();
+            if (!course) return;
+            const { data: rows } = await supabase
+                .from('tutor_courses')
+                .select('user_id, group_price, individual_price, session_type, users(name, pronouns)')
+                .eq('course_id', course.id)
+                .eq('is_approved', true);
+            setCourseTutors(
+                (rows ?? []).map((r: any) => ({
+                    id: r.user_id,
+                    name: r.users?.name ?? 'Unknown',
+                    pronouns: (r.users?.pronouns ?? []).join('/').toLowerCase(),
+                    groupPrice: r.group_price != null ? String(r.group_price) : null,
+                    individualPrice: r.individual_price != null ? String(r.individual_price) : null,
+                    location: r.session_type === 'both' ? ['online', 'in-person'] : [r.session_type ?? 'online'],
+                }))
+            );
+        })();
+    }, [selectedCourse]);
+
+    // Load comments whenever a post is opened
+    useEffect(() => {
+        if (!selectedPostId) {
+            setPostComments([]);
+            return;
+        }
+        boardPosts.fetchComments(selectedPostId).then(setPostComments);
+    }, [selectedPostId]);
 
     // Tutor detail modal state
     const [selectedTutorForDetail, setSelectedTutorForDetail] = useState<any | null>(null);
 
-    // Connection State
-    const [sentConnectionRequests, setSentConnectionRequests] = useState<Set<string>>(new Set());
+    // Compatibility aliases: existing render code below reads/writes these names directly.
+    const connectedFriends = connections.friends;
+    const sentConnectionRequests = connections.sentRequests;
+    const blockedUsers = connections.blocked;
 
     const handleToggleConnect = (id: string) => {
-        setSentConnectionRequests(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) {
-                next.delete(id);
-            } else {
-                next.add(id);
-                // Add to activity feed
-                const user = getUserById(id) || getUserByName(id);
-                if (user) {
-                    const newActivity = {
-                        id: `sent-${Date.now()}`,
-                        type: 'connection_request' as const,
-                        userName: user.name,
-                        userInitial: user.name[0],
-                        timestamp: 'Just now',
-                        isUnread: false,
-                        isPending: false,
-                    };
-                    setActivities(prevActs => [newActivity, ...prevActs] as typeof prevActs);
-                }
-            }
-            return next;
-        });
+        connections.toggleConnect(id);
     };
 
-    // Already Connected State
-    const [connectedFriends, setConnectedFriends] = useState<Set<string>>(new Set(['1'])); // Sarah Chen ID='1'
-    // Blocked Users State
-    const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
-
     const handleDisconnectUser = (id: string, name: string) => {
-        setConnectedFriends(prev => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-        });
+        connections.disconnect(id);
         Alert.alert('Disconnected', `You are no longer connected with ${name}.`);
     };
 
     const handleBlockUser = (id: string, name: string) => {
-        console.log('Blocking user:', id, name);
-        setBlockedUsers(prev => {
-            const next = new Set(prev);
-            next.add(id);
-            console.log('New blocked set size:', next.size);
-            return next;
-        });
-        setConnectedFriends(prev => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-        });
-        setSentConnectionRequests(prev => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-        });
+        connections.block(id);
         Alert.alert('Blocked', `${name} has been blocked.`);
     };
 
@@ -355,403 +363,44 @@ export default function App() {
         }
     ]);
 
-    // Chat state
+    // Chat state — backed by the real-data useChat hook (see top of component).
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-    const [conversations, setConversations] = useState<any[]>([
-        {
-            id: '1',
-            tutorId: '1',
-            tutorName: 'Sarah Chen',
-            tutorInitial: 'S',
-            lastMessage: 'Great! I can help you with SYSC 2006 this week. When works best for you?',
-            timestamp: '2h ago',
-            unreadCount: 0,
-            type: 'tutor' as const,
-        },
-        {
-            id: '2',
-            tutorId: '2',
-            tutorName: 'Marcus Johnson',
-            tutorInitial: 'M',
-            lastMessage: 'Thanks for booking! See you tomorrow at 2pm',
-            timestamp: 'Yesterday',
-            unreadCount: 0,
-            type: 'tutor' as const,
-        },
-        {
-            id: '3',
-            tutorName: 'Jordan Lee',
-            tutorInitial: 'J',
-            lastMessage: 'You: Do you have any availability this weekend?',
-            timestamp: 'Dec 15',
-            unreadCount: 0,
-            type: 'tutor' as const,
-        },
-        {
-            id: '4',
-            tutorName: 'Alex Rivera',
-            tutorInitial: 'A',
-            lastMessage: 'Hey! Are you going to the study session tomorrow?',
-            timestamp: '1h ago',
-            unreadCount: 2,
-            type: 'student' as const,
-        },
-        {
-            id: '5',
-            tutorName: 'Emma Wilson',
-            tutorInitial: 'E',
-            lastMessage: 'You: Thanks for the notes! They were super helpful',
-            timestamp: '3h ago',
-            unreadCount: 0,
-            type: 'student' as const,
-        },
-        {
-            id: '6',
-            tutorName: 'Chris Park',
-            tutorInitial: 'C',
-            lastMessage: 'Did you finish the assignment yet? I\'m stuck on question 3',
-            timestamp: '5h ago',
-            unreadCount: 1,
-            type: 'student' as const,
-        },
-    ]);
-    const [chatMessages, setChatMessages] = useState<Record<string, Message[]>>({
-        '1': [
-            {
-                id: '1',
-                message: 'Hi! I saw you tutor SYSC 2006. Can you help me with pointers and memory management?',
-                timestamp: '10:30 AM',
-                isStudent: true,
-                status: 'read',
-            },
-            {
-                id: '2',
-                message: 'Absolutely! Those are common topics students struggle with. I have great resources for that.',
-                timestamp: '10:32 AM',
-                isStudent: false,
-            },
-            {
-                id: '3',
-                message: 'Great! I can help you with SYSC 2006 this week. When works best for you?',
-                timestamp: '10:33 AM',
-                isStudent: false,
-            },
-        ],
-        '2': [
-            {
-                id: '1',
-                message: 'I just booked a session with you for tomorrow at 2pm. Looking forward to it!',
-                timestamp: 'Yesterday 3:45 PM',
-                isStudent: true,
-                status: 'read',
-            },
-            {
-                id: '2',
-                message: 'Thanks for booking! See you tomorrow at 2pm',
-                timestamp: 'Yesterday 3:50 PM',
-                isStudent: false,
-            },
-        ],
-        '3': [
-            {
-                id: '1',
-                message: 'Hey Jordan! I need help with MATH 1004. Are you available?',
-                timestamp: 'Dec 15 2:20 PM',
-                isStudent: true,
-                status: 'delivered',
-            },
-            {
-                id: '2',
-                message: 'Do you have any availability this weekend?',
-                timestamp: 'Dec 15 2:22 PM',
-                isStudent: true,
-                status: 'delivered',
-            },
-        ],
-        '4': [
-            {
-                id: '1',
-                message: 'Hey! Are you going to the study session tomorrow?',
-                timestamp: '1:15 PM',
-                isStudent: false,
-            },
-            {
-                id: '2',
-                message: 'Yeah, I\'ll be there! What time does it start again?',
-                timestamp: '1:20 PM',
-                isStudent: true,
-                status: 'read',
-            },
-            {
-                id: '3',
-                message: 'It starts at 3pm in the library. See you there!',
-                timestamp: '1:22 PM',
-                isStudent: false,
-            },
-        ],
-        '5': [
-            {
-                id: '1',
-                message: 'Thanks for the notes! They were super helpful',
-                timestamp: '11:30 AM',
-                isStudent: true,
-                status: 'read',
-            },
-            {
-                id: '2',
-                message: 'No problem! Happy to help. Let me know if you need anything else',
-                timestamp: '11:35 AM',
-                isStudent: false,
-            },
-        ],
-        '6': [
-            {
-                id: '1',
-                message: 'Did you finish the assignment yet? I\'m stuck on question 3',
-                timestamp: '9:00 AM',
-                isStudent: false,
-            },
-            {
-                id: '2',
-                message: 'I\'m working on it now. What part of question 3 are you stuck on?',
-                timestamp: '9:15 AM',
-                isStudent: true,
-                status: 'read',
-            },
-        ],
-    });
+    // Compatibility alias: keeps `tutorId` field the older render code expects.
+    const conversations = chat.conversations.map(c => ({ ...c, tutorId: c.otherUserId }));
 
     // Profile screen state and user data
     const [profileScreen, setProfileScreen] = useState<ProfileScreen>('main');
 
-    const [myStudyingCourses, setMyStudyingCourses] = useState<string[]>(['COMP 1405', 'MATH 1007']);
-    const [myTutoringCourses, setMyTutoringCourses] = useState<string[]>(['SYSC 2006']);
+    const myStudyingCourses = courses.studyingCourses;
+    const myTutoringCourses = courses.tutoringCourses;
     const [tutorPricingSessionType, setTutorPricingSessionType] = useState<'online' | 'in-person' | 'both'>('both');
     const [theme, setTheme] = useState<'light' | 'dark'>('light');
-    const [userProfile, setUserProfile] = useState({
-        name: 'Kshitij',
-        pronouns: 'He/Him',
-        year: '3rd Year',
-        program: 'Computer Science',
-        bio: 'Passionate about helping students excel in programming and systems courses.',
-        email: 'kshitij@carleton.ca',
-        phone: '+1 (613) 555-0123',
-        courses: ['SYSC 2006', 'COMP 2402', 'ELEC 2507'],
+    const userProfile = {
+        name: auth.profile?.name ?? 'Student',
+        pronouns: (auth.profile?.pronouns ?? ['He', 'Him']).join('/'),
+        year: auth.profile?.year ?? '',
+        program: auth.profile?.major ?? '',
+        bio: auth.profile?.bio ?? '',
+        email: auth.profile?.email ?? '',
+        phone: '',
+        courses: myStudyingCourses,
         language: 'English',
-    });
+    };
 
     const [paymentMethods, setPaymentMethods] = useState([
         { id: '1', type: 'card' as const, last4: '4242', brand: 'Visa' },
     ]);
 
-    const tutors = [
-        {
-            id: '1',
-            name: 'Sarah Chen',
-            pronouns: 'she/her',
-            courses: ['SYSC 2006', 'COMP 2402', 'ELEC 2507'],
-            groupPrice: '15',
-            individualPrice: '28',
-            sessionTypes: ['1-on-1', 'group'],
-            location: ['online', 'in-person'],
-            nextAvailable: '2h 15m',
-            bio: 'I\'m a 4th year Computer Systems Engineering student passionate about helping others understand complex programming concepts. I specialize in data structures, algorithms, and systems programming. I\'ve been tutoring for 2 years and love making difficult topics accessible and fun!'
-        },
-        {
-            id: '2',
-            name: 'Marcus Johnson',
-            pronouns: 'he/him',
-            courses: ['MATH 1004', 'PHYS 1004'],
-            groupPrice: '12',
-            individualPrice: '25',
-            sessionTypes: ['1-on-1', 'group'],
-            location: ['online'],
-            nextAvailable: 'Tomorrow 2pm',
-            bio: 'Mathematics and Physics tutor with a knack for breaking down complex problems into simple steps.'
-        },
-        {
-            id: '3',
-            name: 'Emily Rodriguez',
-            pronouns: 'she/her',
-            courses: ['SYSC 2006'],
-            groupPrice: '18',
-            individualPrice: '30',
-            sessionTypes: ['1-on-1', 'group'],
-            location: ['in-person'],
-            nextAvailable: '4h 30m',
-            bio: 'Software Engineering student who loves teaching C programming and debugging techniques.'
-        },
-        {
-            id: '4',
-            name: 'Alex Thompson',
-            pronouns: 'they/them',
-            courses: ['COMP 2402', 'MATH 1004'],
-            groupPrice: '14',
-            individualPrice: null,
-            sessionTypes: ['group'],
-            location: ['online', 'in-person'],
-            nextAvailable: '5h 45m',
-            bio: 'Specializing in algorithms and discrete mathematics with group study sessions.'
-        },
-        {
-            id: '5',
-            name: 'Priya Sharma',
-            pronouns: 'she/her',
-            courses: ['ELEC 2507', 'PHYS 1004'],
-            groupPrice: null,
-            individualPrice: '28',
-            sessionTypes: ['1-on-1'],
-            location: ['online'],
-            nextAvailable: 'Tomorrow 10am',
-            bio: 'Electrical Engineering student focusing on circuits and electromagnetics.'
-        },
-        {
-            id: '6',
-            name: 'Jordan Lee',
-            pronouns: 'he/him',
-            courses: ['SYSC 2006', 'COMP 2402', 'MATH 1004'],
-            groupPrice: 'Free',
-            individualPrice: 'Free',
-            sessionTypes: ['1-on-1', 'group'],
-            location: ['in-person'],
-            nextAvailable: '3h 20m',
-            bio: 'Offering free peer tutoring as part of my teaching assistant training program.'
-        }
-    ];
-
     // Mock classmates data for social features
-    const mockClassmates = [
-        {
-            id: 'c1',
-            name: 'Jamie Wilson',
-            pronouns: 'they/them',
-            year: '2nd Year',
-            major: 'Computer Science',
-            gender: 'Non-Binary' as const,
-            photoUrl: 'https://images.unsplash.com/photo-1542596594-649edbc13630?q=80&w=2787&auto=format&fit=crop',
-            sharedCourses: ['COMP 2402', 'SYSC 2006'],
-            prompts: [
-                { prompt: "I study best at...", answer: "Late night in MacOdrum Library with lo-fi beats" },
-                { prompt: "I'm always down to...", answer: "Grab coffee and debug together" },
-                { prompt: "My toxic study trait is...", answer: "Starting assignments 2 hours before deadline" },
-            ],
-        },
-        {
-            id: 'c2',
-            name: 'Michael Chen',
-            pronouns: 'he/him',
-            year: '3rd Year',
-            major: 'Software Engineering',
-            gender: 'Man' as const,
-            photoUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=2662&auto=format&fit=crop',
-            sharedCourses: ['SYSC 2006'],
-            prompts: [
-                { prompt: "Need someone to help me out with...", answer: "SYSC 2006 - C programming is killing me" },
-                { prompt: "Best study spot on campus is...", answer: "The quiet floor in Richcraft Hall" },
-                { prompt: "After exams, you'll find me...", answer: "At Mike's Place celebrating" },
-            ],
-        },
-        {
-            id: 'c3',
-            name: 'Aisha Patel',
-            pronouns: 'she/her',
-            year: '2nd Year',
-            major: 'Computer Science',
-            gender: 'Woman' as const,
-            photoUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=2459&auto=format&fit=crop',
-            sharedCourses: ['COMP 2402', 'MATH 1004'],
-            prompts: [
-                { prompt: "I'll buy you coffee if...", answer: "You explain recursion to me one more time" },
-                { prompt: "My go-to study snack is...", answer: "Tim's iced coffee and a farmer's wrap" },
-                { prompt: "I'm passionate about...", answer: "Making tech more accessible and inclusive" },
-            ],
-        },
-        {
-            id: 'c4',
-            name: 'David Kim',
-            pronouns: 'he/him',
-            year: '4th Year',
-            major: 'Electrical Engineering',
-            gender: 'Man' as const,
-            photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=2787&auto=format&fit=crop',
-            sharedCourses: ['ELEC 2507'],
-            prompts: [
-                { prompt: "I can teach you how to...", answer: "Solder, design PCBs, and not blow up circuits" },
-                { prompt: "The class I'm dreading most is...", answer: "ELEC 4705 - RF Engineering" },
-                { prompt: "I procrastinate by...", answer: "Building random Arduino projects instead of studying" },
-            ],
-        },
-        {
-            id: 'c5',
-            name: 'Priya Sharma',
-            pronouns: 'she/her',
-            year: '3rd Year',
-            major: 'Health Sciences',
-            gender: 'Woman' as const,
-            photoUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=2787&auto=format&fit=crop',
-            sharedCourses: ['PHYS 1004'],
-            prompts: [
-                { prompt: "My secret talent is...", answer: "Memorizing entire anatomy textbooks in one night" },
-                { prompt: "Don't talk to me until...", answer: "I've had my morning matcha latte" },
-                { prompt: "I'm looking for a study buddy who...", answer: "Can quiz me effectively on flashcards" },
-            ],
-        },
-    ];
+    // Real activity/notifications data (from useActivity)
+    const activities = activityFeed.activities;
 
-    // Mock activity/notifications data
-    const [activities, setActivities] = useState<any[]>([
-        {
-            id: 'a0',
-            type: 'connection_request' as const,
-            userName: 'Jamie Wilson',
-            userInitial: 'J',
-            timestamp: '2h ago',
-            isUnread: true,
-            isPending: true,
-        },
-        {
-            id: 'a1',
-            type: 'connection_accepted' as const,
-            userName: 'Sarah Chen',
-            userInitial: 'S',
-            timestamp: '1h ago',
-            isUnread: true,
-            isPending: false,
-        },
-        {
-            id: 'a2',
-            type: 'board_like' as const,
-            userName: 'Marcus',
-            userInitial: 'M',
-            courseName: 'COMP 2402',
-            timestamp: '3h ago',
-            isUnread: true,
-            isPending: false,
-        },
-        {
-            id: 'a3',
-            type: 'board_reply' as const,
-            userName: 'Emily',
-            userInitial: 'E',
-            message: undefined,
-            courseName: undefined,
-            timestamp: 'Yesterday',
-            isUnread: false,
-            isPending: false,
-        },
-    ]);
-
-    // Mock courses data for home screen
-    const mockCourses = [
-        { code: 'SYSC 2006', name: 'Foundations of Imperative Programming', activeCount: 5, tutorCount: 3, studentCount: 234 },
-        { code: 'COMP 2402', name: 'Abstract Data Types and Algorithms', activeCount: 8, tutorCount: 2, studentCount: 187 },
-        { code: 'MATH 1004', name: 'Calculus for Engineering or Physics', activeCount: 3, tutorCount: 2, studentCount: 312 },
-        { code: 'ELEC 2507', name: 'Electronics I', activeCount: 2, tutorCount: 2, studentCount: 145 },
-    ];
+    // Real course catalog (the user's own studying/tutoring courses, with live counts)
+    const mockCourses = courses.catalog;
 
     // State for new social app tab
     const [socialActiveTab, setSocialActiveTab] = useState<SocialTabValue>('home');
-    const [currentUserGender] = useState<'Man' | 'Woman' | 'Non-Binary' | 'Prefer not to say'>('Man'); // For demo
+    const currentUserGender = (auth.profile?.gender ?? 'Prefer not to say') as 'Man' | 'Woman' | 'Non-Binary' | 'Prefer not to say';
     const [userStatus, setUserStatus] = useState('Cramming');
 
     // Tutor mode render function
@@ -811,43 +460,32 @@ export default function App() {
                         activities={activities}
                         onAcceptConnection={(id) => {
                             const activity = activities.find(a => a.id === id);
-                            if (activity?.userName) {
-                                const user = mockClassmates.find(u => u.name === activity.userName);
-                                if (user) {
-                                    setConnectedFriends(prev => {
-                                        const next = new Set(prev);
-                                        next.add(user.id);
-                                        return next;
-                                    });
-                                }
+                            if (activity?.referenceId) {
+                                connections.acceptRequest(activity.referenceId);
                             }
-
-                            setActivities(prev => prev.map(a =>
-                                a.id === id ? { ...a, isPending: false, isUnread: false, type: 'connection_accepted' as const } : a
-                            ));
+                            activityFeed.markRead(id);
                         }}
                         onDeclineConnection={(id) => {
-                            setActivities(prev => prev.filter(a => a.id !== id));
+                            const activity = activities.find(a => a.id === id);
+                            if (activity?.referenceId) {
+                                connections.declineRequest(activity.referenceId);
+                            }
+                            activityFeed.removeActivity(id);
                         }}
                         onActivityTap={(activity) => {
-                            // Mark as read when tapped
-                            setActivities(prev => prev.map(a =>
-                                a.id === activity.id ? { ...a, isUnread: false } : a
-                            ));
+                            activityFeed.markRead(activity.id);
 
                             // Navigate based on activity type
                             if (activity.type === 'message') {
                                 setActiveTutorTab('chat');
                             } else if (activity.type === 'board_reply' || activity.type === 'board_like') {
-                                // Navigate to the course board
                                 if (activity.courseName) {
-                                    const course = mockCourses.find(c => c.code === activity.courseName);
-                                    if (course) setSelectedCourse(course.code);
+                                    setSelectedCourse(activity.courseName);
                                 }
                             }
                         }}
                         onMarkAllRead={() => {
-                            setActivities(prev => prev.map(a => ({ ...a, isUnread: false })));
+                            activityFeed.markAllRead();
                         }}
                         onViewProfile={(name) => {
                             const user = mockClassmates.find(u => u.name === name);
@@ -871,7 +509,7 @@ export default function App() {
                         onBlock={(id) => handleBlockUser(id, mockClassmates.find(c => c.id === id)?.name || 'User')}
                         onDisconnect={(id) => handleDisconnectUser(id, mockClassmates.find(c => c.id === id)?.name || 'User')}
                         onViewProfile={(profile) => {
-                            console.log('View profile:', profile.name);
+                            handleViewProfile(profile.id);
                         }}
                         isDarkMode={theme === 'dark'}
                     />
@@ -882,17 +520,11 @@ export default function App() {
                         conversations={conversations}
                         onConversationClick={(id) => {
                             setSelectedConversationId(id);
-                            // Mark conversation as read when opened
-                            setConversations(conversations.map(c =>
-                                c.id === id ? { ...c, unreadCount: 0 } : c
-                            ));
+                            chat.markConversationRead(id);
+                            chat.fetchMessages(id);
                         }}
                         onDeleteConversation={(conversationId) => {
-                            setConversations(conversations.filter(c => c.id !== conversationId));
-                            // Also clean up chat messages
-                            const newChatMessages = { ...chatMessages };
-                            delete newChatMessages[conversationId];
-                            setChatMessages(newChatMessages);
+                            chat.deleteConversation(conversationId);
                         }}
                         isTutor={true}
                         isDarkMode={theme === 'dark'}
@@ -910,7 +542,8 @@ export default function App() {
                         onSettings={() => setProfileScreen('settings')}
                         onConnections={() => setProfileScreen('connections')}
                         connectionsCount={connectedFriends.size}
-                        onLogout={() => {
+                        onLogout={async () => {
+                            await auth.signOut();
                             setIsOnboarding(true);
                             setOnboardingScreen('welcome');
                             setTheme('light');
@@ -943,57 +576,16 @@ export default function App() {
         if (!selectedCourse) return null;
 
         const course = mockCourses.find(c => c.code === selectedCourse);
-        const courseTutors = tutors.filter(t => t.courses.includes(selectedCourse));
-
-        // Mock posts for the course
-        const mockPosts = [
-            {
-                id: '1',
-                authorName: 'Sarah Chen',
-                authorInitial: 'S',
-                authorYear: '4th Year',
-                timestamp: '2h ago',
-                content: "Does anyone have notes from today's lecture? I had to leave early for an appointment.",
-                likes: 5,
-                comments: 3,
-                isLiked: false,
-                type: 'post' as const,
-            },
-            {
-                id: '2',
-                authorName: 'Marcus Johnson',
-                authorInitial: 'M',
-                authorYear: '3rd Year',
-                timestamp: '4h ago',
-                content: "Can someone explain how pointers work in C? I'm really struggling with the assignment. 😭",
-                likes: 8,
-                comments: 12,
-                isLiked: true,
-                type: 'question' as const,
-            },
-            {
-                id: '3',
-                authorName: 'Emily Rodriguez',
-                authorInitial: 'E',
-                authorYear: '2nd Year',
-                timestamp: '1d ago',
-                content: "Study group meeting tomorrow at 3pm in the library! Drop a comment if you're coming.",
-                likes: 15,
-                comments: 7,
-                isLiked: false,
-                type: 'post' as const,
-            },
-        ];
 
         return (
             <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'transparent' }}>
                 <CourseDetailScreen
                     courseCode={selectedCourse}
-                    posts={mockPosts}
+                    posts={boardPosts.posts}
                     tutors={courseTutors.map(t => ({
                         id: t.id,
                         name: t.name,
-                        courses: t.courses,
+                        courses: [selectedCourse],
                         pronouns: t.pronouns,
                         groupPrice: t.groupPrice,
                         individualPrice: t.individualPrice,
@@ -1002,12 +594,10 @@ export default function App() {
                     activeCount={course?.activeCount || 0}
                     studentCount={course?.studentCount || 0}
                     onBack={() => setSelectedCourse(null)}
-                    onCreatePost={(content, type) => console.log('Create post:', content, type)}
-                    onLikePost={(id) => console.log('Like post:', id)}
-                    onCommentPost={(id) => console.log('Comment on post:', id)}
-                    onMessageTutor={(id) => {
-                        console.log('Message tutor:', id);
-
+                    onCreatePost={(content, type) => boardPosts.createPost(content, type)}
+                    onLikePost={(id) => boardPosts.toggleLike(id)}
+                    onCommentPost={(id) => setSelectedPostId(id)}
+                    onMessageTutor={async (id) => {
                         // 1. Close the course detail overlay
                         setSelectedCourse(null);
 
@@ -1017,32 +607,51 @@ export default function App() {
                             setActiveTutorTab('chat');
                         }
 
-                        // 3. Find or Create conversation
-                        const existingConv = conversations.find(c => c.tutorId === id);
-
-                        if (existingConv) {
-                            console.log('Found existing conversation:', existingConv.id);
-                            setSelectedConversationId(existingConv.id);
-                        } else {
-                            console.log('Creating new conversation for tutor:', id);
-                            const tutor = tutors.find(t => t.id === id);
-                            if (tutor) {
-                                const newConv = {
-                                    id: `conv-${Date.now()}`,
-                                    tutorId: id,
-                                    tutorName: tutor.name,
-                                    tutorInitial: tutor.name[0],
-                                    lastMessage: 'Start a conversation',
-                                    timestamp: 'Now',
-                                    unreadCount: 0,
-                                    type: 'tutor' as const,
-                                };
-                                setConversations(prev => [newConv, ...prev]);
-                                setSelectedConversationId(newConv.id);
-                            } else {
-                                console.warn('Tutor not found for id:', id);
-                            }
+                        // 3. Find or create the conversation with this tutor
+                        const convId = await chat.getOrCreateConversation(id);
+                        if (convId) {
+                            setSelectedConversationId(convId);
+                            await chat.fetchMessages(convId);
                         }
+                    }}
+                    onViewProfile={handleViewProfile}
+                    isDarkMode={theme === 'dark'}
+                />
+            </View>
+        );
+    };
+
+    // Helper to render the post detail (comments) overlay
+    const renderPostDetailOverlay = () => {
+        if (!selectedPostId) return null;
+        const post = boardPosts.posts.find(p => p.id === selectedPostId);
+        if (!post) return null;
+
+        return (
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'transparent' }}>
+                <PostDetailScreen
+                    postId={post.id}
+                    authorName={post.authorName}
+                    authorInitial={post.authorInitial}
+                    authorYear={post.authorYear}
+                    timestamp={post.timestamp}
+                    content={post.content}
+                    likes={post.likes}
+                    comments={postComments}
+                    isLiked={post.isLiked}
+                    type={post.type}
+                    onBack={() => setSelectedPostId(null)}
+                    onLikePost={() => boardPosts.toggleLike(post.id)}
+                    onLikeComment={(commentId) => {
+                        const comment = postComments.find(c => c.id === commentId);
+                        if (!comment) return;
+                        setPostComments(prev => prev.map(c => c.id === commentId ? { ...c, isLiked: !c.isLiked, likes: c.likes + (c.isLiked ? -1 : 1) } : c));
+                        boardPosts.toggleCommentLike(commentId, comment.isLiked);
+                    }}
+                    onAddComment={async (content) => {
+                        await boardPosts.addComment(post.id, content);
+                        const updated = await boardPosts.fetchComments(post.id);
+                        setPostComments(updated);
                     }}
                     onViewProfile={handleViewProfile}
                     isDarkMode={theme === 'dark'}
@@ -1064,7 +673,17 @@ export default function App() {
         const overlayStyle = { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'transparent' };
 
         // Render settings as base overlay if we're on a nested screen
-        const needsSettingsBase = ['change-password', 'blocked-users', 'privacy-policy', 'terms-of-service'].includes(profileScreen);
+        const needsSettingsBase = ['change-password', 'change-email', 'blocked-users', 'privacy-policy', 'terms-of-service'].includes(profileScreen);
+
+        const handleDeleteAccount = async () => {
+            const { error } = await auth.deleteAccount();
+            if (error) {
+                Alert.alert('Error', error);
+                return;
+            }
+            setIsOnboarding(true);
+            setOnboardingScreen('welcome');
+        };
 
         return (
             <>
@@ -1072,15 +691,18 @@ export default function App() {
                     <View style={overlayStyle}>
                         <SettingsScreen
                             {...commonProps}
-                            email="john.doe@carleton.ca"
-                            isTutor={false}
+                            email={auth.profile?.email ?? ''}
+                            isTutor={userRole === 'tutor'}
                             theme={theme}
                             onChangePassword={() => setProfileScreen('change-password')}
+                            onChangeEmail={() => setProfileScreen('change-email')}
+                            onDeleteAccount={handleDeleteAccount}
                             onBlockedUsers={() => setProfileScreen('blocked-users')}
                             onPrivacyPolicy={() => setProfileScreen('privacy-policy')}
                             onTermsOfService={() => setProfileScreen('terms-of-service')}
                             onThemeChange={(newTheme) => setTheme(newTheme)}
-                            onLogout={() => {
+                            onLogout={async () => {
+                                await auth.signOut();
                                 setIsOnboarding(true);
                                 setOnboardingScreen('welcome');
                             }}
@@ -1092,15 +714,39 @@ export default function App() {
                     <View style={overlayStyle}>
                         <EditProfileScreen
                             {...commonProps}
-                            name={userRole === 'tutor' ? tutorProfile.name : studentProfile.name}
-                            pronouns={userRole === 'tutor' ? (tutorProfile.pronouns || 'He/Him') : (studentProfile.pronouns || 'He/Him')}
-                            year={userRole === 'tutor' ? (tutorProfile.year || '3rd Year') : (studentProfile.year || '2nd Year')}
-                            program={userRole === 'tutor' ? tutorProfile.program : studentProfile.program}
-                            bio={userRole === 'tutor' ? tutorProfile.bio : studentProfile.bio}
-                            initial={(userRole === 'tutor' ? tutorProfile.name : studentProfile.name).charAt(0)}
+                            name={studentProfile.name}
+                            pronouns={studentProfile.pronouns || 'He/Him'}
+                            year={studentProfile.year || '2nd Year'}
+                            program={studentProfile.program}
+                            bio={studentProfile.bio}
+                            initial={studentProfile.name.charAt(0)}
                             isTutor={userRole === 'tutor'}
-                            onSave={(data) => {
-                                // Update profile logic would go here
+                            profileImage={studentProfile.photoUrl}
+                            onSave={async (data) => {
+                                let photoUrl = data.profileImage;
+                                if (photoUrl && photoUrl.startsWith('file:')) {
+                                    try {
+                                        photoUrl = currentUserId ? await uploadAvatar(currentUserId, photoUrl) : photoUrl;
+                                    } catch (e) {
+                                        console.error('Avatar upload failed:', e);
+                                    }
+                                }
+                                const { error } = await auth.updateProfile({
+                                    name: data.name,
+                                    pronouns: data.pronouns,
+                                    gender: data.gender,
+                                    year: data.year,
+                                    degreeLevel: data.degreeLevel,
+                                    major: data.program,
+                                    bio: data.bio,
+                                    profileVisibility: data.profileVisibility,
+                                    photoUrl,
+                                    prompts: data.prompts,
+                                });
+                                if (error) {
+                                    Alert.alert('Error', error);
+                                    return;
+                                }
                                 setProfileScreen('main');
                             }}
                             isDarkMode={theme === 'dark'}
@@ -1114,12 +760,12 @@ export default function App() {
                             selectedCourses={myStudyingCourses}
                             tutoringCourses={myTutoringCourses}
                             isTutor={isTutor}
-                            onSave={(courses) => {
-                                setMyStudyingCourses(courses);
+                            onSave={(newCourses) => {
+                                courses.setAllStudyingCourses(newCourses);
                                 setProfileScreen('main');
                             }}
-                            onSaveTutoring={(courses) => {
-                                setMyTutoringCourses(courses);
+                            onSaveTutoring={(newCourses, proofUris) => {
+                                courses.setAllTutoringCourses(newCourses, proofUris);
                                 setProfileScreen('main');
                             }}
                             isDarkMode={theme === 'dark'}
@@ -1135,7 +781,6 @@ export default function App() {
                             initialSessionType={tutorPricingSessionType}
                             onBack={() => setProfileScreen('main')}
                             onSave={(data) => {
-                                console.log('Saved pricing:', data);
                                 setTutorPricingSessionType(data.sessionType);
                                 setProfileScreen('main');
                             }}
@@ -1147,15 +792,18 @@ export default function App() {
                     <View style={overlayStyle}>
                         <SettingsScreen
                             {...commonProps}
-                            email="john.doe@carleton.ca"
-                            isTutor={false}
+                            email={auth.profile?.email ?? ''}
+                            isTutor={userRole === 'tutor'}
                             theme={theme}
                             onChangePassword={() => setProfileScreen('change-password')}
+                            onChangeEmail={() => setProfileScreen('change-email')}
+                            onDeleteAccount={handleDeleteAccount}
                             onBlockedUsers={() => setProfileScreen('blocked-users')}
                             onPrivacyPolicy={() => setProfileScreen('privacy-policy')}
                             onTermsOfService={() => setProfileScreen('terms-of-service')}
                             onThemeChange={(newTheme) => setTheme(newTheme)}
-                            onLogout={() => {
+                            onLogout={async () => {
+                                await auth.signOut();
                                 setIsOnboarding(true);
                                 setOnboardingScreen('welcome');
                             }}
@@ -1167,7 +815,33 @@ export default function App() {
                     <View style={overlayStyle}>
                         <ChangePasswordScreen
                             onBack={() => setProfileScreen('settings')}
-                            onSave={() => setProfileScreen('settings')}
+                            onSave={async (currentPassword, newPassword) => {
+                                const { error } = await auth.updatePassword(currentPassword, newPassword);
+                                if (error) {
+                                    Alert.alert('Error', error);
+                                    return;
+                                }
+                                Alert.alert('Success', 'Your password has been updated.');
+                                setProfileScreen('settings');
+                            }}
+                            isDarkMode={theme === 'dark'}
+                        />
+                    </View>
+                )}
+                {profileScreen === 'change-email' && (
+                    <View style={overlayStyle}>
+                        <ChangeEmailScreen
+                            currentEmail={auth.profile?.email ?? ''}
+                            onBack={() => setProfileScreen('settings')}
+                            onSave={async (newEmail, currentPassword) => {
+                                const { error } = await auth.updateEmail(currentPassword, newEmail);
+                                if (error) {
+                                    Alert.alert('Error', error);
+                                    return;
+                                }
+                                Alert.alert('Check your inbox', 'Confirm the change from a link sent to your new email address.');
+                                setProfileScreen('settings');
+                            }}
                             isDarkMode={theme === 'dark'}
                         />
                     </View>
@@ -1184,12 +858,8 @@ export default function App() {
                                 };
                             })}
                             onBack={() => setProfileScreen('settings')}
-                            onUnblock={(userId) => {
-                                setBlockedUsers(prev => {
-                                    const next = new Set(prev);
-                                    next.delete(userId);
-                                    return next;
-                                });
+                            onUnblock={(id) => {
+                                connections.unblock(id);
                             }}
                             isDarkMode={theme === 'dark'}
                         />
@@ -1214,31 +884,9 @@ export default function App() {
                 {profileScreen === 'connections' && (
                     <View style={overlayStyle}>
                         <ConnectionsListScreen
-                            connections={Array.from(connectedFriends).map(friendId => {
-                                const classmate = mockClassmates.find(c => c.id === friendId);
-                                if (classmate) {
-                                    return {
-                                        id: classmate.id,
-                                        name: classmate.name,
-                                        photoUrl: classmate.photoUrl,
-                                        year: classmate.year,
-                                        major: classmate.major,
-                                        sharedCourses: classmate.sharedCourses,
-                                        connectedSince: '2 days ago',
-                                    };
-                                }
-                                // Fallback for IDs not in mockClassmates
-                                return {
-                                    id: friendId,
-                                    name: 'Sarah Chen',
-                                    year: '4th Year',
-                                    major: 'Computer Systems Engineering',
-                                    sharedCourses: ['SYSC 2006'],
-                                    connectedSince: '1 week ago',
-                                };
-                            })}
+                            connections={connections.friendProfiles}
                             onBack={() => setProfileScreen('main')}
-                            onMessage={(connectionId) => {
+                            onMessage={async (connectionId) => {
                                 // Switch to chat tab based on user role
                                 if (userRole === 'tutor') {
                                     setActiveTutorTab('chat');
@@ -1246,30 +894,10 @@ export default function App() {
                                     setSocialActiveTab('chat');
                                 }
                                 setProfileScreen('main');
-                                // Find or create a conversation with this person
-                                const connection = mockClassmates.find(c => c.id === connectionId);
-                                const existingConv = conversations.find(c =>
-                                    c.tutorName === connection?.name || c.id === connectionId
-                                );
-                                if (existingConv) {
-                                    setSelectedConversationId(existingConv.id);
-                                } else if (connection) {
-                                    // Create a new conversation for this connection
-                                    const newConvId = `conv-${connectionId}`;
-                                    setConversations([
-                                        {
-                                            id: newConvId,
-                                            tutorName: connection.name,
-                                            tutorInitial: connection.name.charAt(0),
-                                            lastMessage: 'Start a conversation!',
-                                            timestamp: 'Now',
-                                            courseTags: connection.sharedCourses || [],
-                                            unreadCount: 0,
-                                            type: 'dm',
-                                        },
-                                        ...conversations,
-                                    ]);
-                                    setSelectedConversationId(newConvId);
+                                const convId = await chat.getOrCreateConversation(connectionId);
+                                if (convId) {
+                                    setSelectedConversationId(convId);
+                                    await chat.fetchMessages(convId);
                                 }
                             }}
                             onViewProfile={(connectionId) => handleViewProfile(connectionId)}
@@ -1289,7 +917,7 @@ export default function App() {
         if (currentTab !== 'chat' || !selectedConversationId) return null;
 
         const conversation = conversations.find(c => c.id === selectedConversationId);
-        const msgs = chatMessages[selectedConversationId] || [];
+        const msgs = chat.messagesByConversation[selectedConversationId] || [];
 
         return (
             <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'transparent' }}>
@@ -1300,30 +928,13 @@ export default function App() {
                     onBack={() => setSelectedConversationId(null)}
                     type={conversation?.type}
                     onViewProfile={() => {
-                        const target = conversation?.tutorName || '';
+                        const target = conversation?.otherUserId || conversation?.tutorName || '';
                         handleViewProfile(target);
                     }}
                     onSendMessage={(text) => {
-                        const newMessage: Message = {
-                            id: Date.now().toString(),
-                            message: text,
-                            timestamp: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-                            isStudent: !isTutor,
-                            status: 'sent',
-                        };
-                        setChatMessages({
-                            ...chatMessages,
-                            [selectedConversationId]: [...msgs, newMessage],
-                        });
-
-                        // Update conversation preview
-                        setConversations(conversations.map(c =>
-                            c.id === selectedConversationId
-                                ? { ...c, lastMessage: `You: ${text}`, timestamp: 'Just now', unreadCount: 0 }
-                                : c
-                        ));
+                        chat.sendMessage(selectedConversationId, text);
                     }}
-                    isTutorView={isTutor}
+                    isTutorView={false}
                     isDarkMode={theme === 'dark'}
                 />
             </View>
@@ -1356,7 +967,7 @@ export default function App() {
                         onBlock={(id) => handleBlockUser(id, mockClassmates.find(c => c.id === id)?.name || 'User')}
                         onDisconnect={(id) => handleDisconnectUser(id, mockClassmates.find(c => c.id === id)?.name || 'User')}
                         onViewProfile={(profile) => {
-                            console.log('View profile:', profile.name);
+                            handleViewProfile(profile.id);
                         }}
                         isDarkMode={theme === 'dark'}
                     />
@@ -1368,9 +979,11 @@ export default function App() {
                         conversations={conversations}
                         onConversationClick={(id) => {
                             setSelectedConversationId(id);
-                            setConversations(prev =>
-                                prev.map(c => c.id === id ? { ...c, unreadCount: 0 } : c)
-                            );
+                            chat.markConversationRead(id);
+                            chat.fetchMessages(id);
+                        }}
+                        onDeleteConversation={(conversationId) => {
+                            chat.deleteConversation(conversationId);
                         }}
                         isDarkMode={theme === 'dark'}
                     />
@@ -1382,43 +995,32 @@ export default function App() {
                         activities={activities}
                         onAcceptConnection={(id) => {
                             const activity = activities.find(a => a.id === id);
-                            if (activity?.userName) {
-                                const user = mockClassmates.find(u => u.name === activity.userName);
-                                if (user) {
-                                    setConnectedFriends(prev => {
-                                        const next = new Set(prev);
-                                        next.add(user.id);
-                                        return next;
-                                    });
-                                }
+                            if (activity?.referenceId) {
+                                connections.acceptRequest(activity.referenceId);
                             }
-
-                            setActivities(prev => prev.map(a =>
-                                a.id === id ? { ...a, isPending: false, isUnread: false, type: 'connection_accepted' as const } : a
-                            ));
+                            activityFeed.markRead(id);
                         }}
                         onDeclineConnection={(id) => {
-                            setActivities(prev => prev.filter(a => a.id !== id));
+                            const activity = activities.find(a => a.id === id);
+                            if (activity?.referenceId) {
+                                connections.declineRequest(activity.referenceId);
+                            }
+                            activityFeed.removeActivity(id);
                         }}
                         onActivityTap={(activity) => {
-                            // Mark as read when tapped
-                            setActivities(prev => prev.map(a =>
-                                a.id === activity.id ? { ...a, isUnread: false } : a
-                            ));
+                            activityFeed.markRead(activity.id);
 
                             // Navigate based on activity type
                             if (activity.type === 'message') {
                                 setSocialActiveTab('chat');
                             } else if (activity.type === 'board_reply' || activity.type === 'board_like') {
-                                // Navigate to the course board
                                 if (activity.courseName) {
-                                    const course = mockCourses.find(c => c.code === activity.courseName);
-                                    if (course) setSelectedCourse(course.code);
+                                    setSelectedCourse(activity.courseName);
                                 }
                             }
                         }}
                         onMarkAllRead={() => {
-                            setActivities(prev => prev.map(a => ({ ...a, isUnread: false })));
+                            activityFeed.markAllRead();
                         }}
                         onViewProfile={(name) => {
                             const user = mockClassmates.find(u => u.name === name);
@@ -1435,14 +1037,15 @@ export default function App() {
                 return (
                     <StudentProfileScreen
                         name={userProfile.name}
-                        email="john.doe@carleton.ca"
+                        email={auth.profile?.email ?? ''}
                         role="Student"
                         connectionsCount={connectedFriends.size}
                         onEditProfile={() => setProfileScreen('edit-profile')}
                         onMyCourses={() => setProfileScreen('my-courses')}
                         onConnections={() => setProfileScreen('connections')}
                         onSettings={() => setProfileScreen('settings')}
-                        onLogout={() => {
+                        onLogout={async () => {
+                            await auth.signOut();
                             setIsOnboarding(true);
                             setOnboardingScreen('welcome');
                             setTheme('light');
@@ -1743,6 +1346,7 @@ export default function App() {
                                         <View className="flex-1">
                                             {renderTutorContent()}
                                             {renderCourseDetailOverlay()}
+                                            {renderPostDetailOverlay()}
                                             {renderChatOverlay()}
                                             {renderProfileOverlay()}
                                         </View>
@@ -1770,6 +1374,7 @@ export default function App() {
                                         <View className="flex-1" style={{ position: 'relative' }}>
                                             {renderSocialContent()}
                                             {renderCourseDetailOverlay()}
+                                            {renderPostDetailOverlay()}
                                             {renderChatOverlay()}
                                             {renderProfileOverlay()}
                                         </View>
