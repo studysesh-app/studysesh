@@ -5,6 +5,65 @@
 
 ---
 
+## 0. Quick Start (bare-minimum backend setup)
+
+The schema, RLS policies, course seed, and CLI scaffolding (`supabase/config.toml`) already
+live in this repo — the only thing missing is an actual hosted Supabase project, which only
+you can create (requires your own account/login).
+
+1. Go to [supabase.com/dashboard](https://supabase.com/dashboard) → **New project** (free tier
+   is enough). Save the generated DB password somewhere safe.
+2. In the project's **SQL Editor**, run [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initial_schema.sql),
+   then [`supabase/migrations/002_seed_courses.sql`](supabase/migrations/002_seed_courses.sql).
+   (Or link the project locally with `npx supabase link --project-ref <ref>` and run
+   `npx supabase db push` instead of pasting SQL manually.)
+3. In **Project Settings → API**, copy the **Project URL** and **anon public key**.
+4. In `.env`, set:
+   ```
+   EXPO_PUBLIC_DEMO_MODE=false
+   EXPO_PUBLIC_SUPABASE_URL=<your project URL>
+   EXPO_PUBLIC_SUPABASE_ANON_KEY=<your anon key>
+   ```
+5. Restart Metro with a cache clear: `npx expo start -c`.
+6. (Optional, avoids the free-tier auto-pause) Enable **Auth → Email** provider and confirm
+   sign-up works end-to-end with a `@cmail.carleton.ca` address.
+
+Everything below is background/detail on *why* the schema looks the way it does.
+
+---
+
+## 0.1 CI/CD (GitHub Actions)
+
+Two workflows already exist under `.github/workflows/`:
+
+### `supabase-migrations.yml` — auto-applies DB migrations
+Runs `supabase db push` against the linked project whenever a push to `main` touches
+`supabase/migrations/**` (or via manual "Run workflow"). Requires these **repo secrets**
+(Settings → Secrets and variables → Actions):
+- `SUPABASE_ACCESS_TOKEN` — personal access token from
+  [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens)
+- `SUPABASE_PROJECT_ID` — the project ref (in the project URL:
+  `https://supabase.com/dashboard/project/<ref>`)
+- `SUPABASE_DB_PASSWORD` — the DB password set when the project was created
+
+### `deploy-web.yml` — auto-builds & deploys the web frontend
+Runs `npx expo export -p web` and publishes `dist/` to **GitHub Pages** on every push to
+`main`. One-time manual setup required (can't be done via API without repo admin access):
+- Repo **Settings → Pages → Source → GitHub Actions**.
+- Add repo secrets `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` once the real
+  project exists (falls back to demo mode if unset — set repo **variable**
+  `EXPO_PUBLIC_DEMO_MODE=false` once ready to go live).
+- Site will be published at `https://ksmavai.github.io/studysesh/`. `app.json` sets
+  `experiments.baseUrl: "/studysesh"` so web asset paths resolve under that subpath — this
+  also means local `npx expo start --web` now serves under `/studysesh` too. Remove that
+  `baseUrl` (and switch the workflow to a different static host like Vercel/Netlify/Cloudflare
+  Pages) if that trade-off becomes annoying.
+
+Native (iOS/Android) builds are out of scope for this pipeline — those are exported/submitted
+separately (e.g. with EAS Build), as planned.
+
+---
+
 ## Table of Contents
 
 1. [Tech Stack Decision](#1-tech-stack-decision)
