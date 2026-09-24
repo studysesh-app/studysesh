@@ -285,7 +285,7 @@ export function useAuth(): UseAuthReturn {
         .from('users')
         .select('id')
         .eq('id', data.user.id)
-        .single();
+        .maybeSingle();
 
       if (!profileData) {
         return { error: null, needsProfile: true };
@@ -335,7 +335,7 @@ export function useAuth(): UseAuthReturn {
       .from('users')
       .select('*')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
     if (error || !data) return null;
     return data as UserProfile;

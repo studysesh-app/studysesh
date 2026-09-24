@@ -973,6 +973,7 @@ INSERT INTO public.courses (code, name) VALUES
   ('COMP 4601', 'Intelligent Web-based Information Systems'),
   ('COMP 4602', 'Social Networking'),
   ('COMP 4701', 'Computing, Society, and Ethics'),
+  ('COMP 4801', 'Algorithms for Data Mining, Web, and Social Networks')
   ('COMP 4803', 'Computable Functions'),
   ('COMP 4804', 'Design and Analysis of Algorithms II'),
   ('COMP 4805', 'Theory of Automata'),

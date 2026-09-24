@@ -1272,7 +1272,7 @@ export default function App() {
 
                 <FadeTransition isVisible={onboardingScreen === 'tutor-proof-upload'} zIndex={9}>
                     <TutorProofUploadScreen
-                        courses={onboardingCourses}
+                        courses={onboardingTutorCourses.length > 0 ? onboardingTutorCourses : onboardingCourses}
                         onBack={() => setOnboardingScreen('tutor-course-application')}
                         onContinue={() => setOnboardingScreen('tutor-pricing-setup')}
                     />
