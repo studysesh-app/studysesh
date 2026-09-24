@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Alert, LogBox } from 'react-native';
+import { View, LogBox } from 'react-native';
+import { showAlert } from '../lib/alert';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -138,6 +139,7 @@ export default function App() {
     const [onboardingPassword, setOnboardingPassword] = useState('');
     const [onboardingTutorCourses, setOnboardingTutorCourses] = useState<string[]>([]);
     const [onboardingTutorPricing, setOnboardingTutorPricing] = useState<any>(null);
+    const [onboardingTutorProofs, setOnboardingTutorProofs] = useState<Record<string, string>>({});
 
     // Auto-login: if user has session + profile, skip onboarding
     useEffect(() => {
@@ -283,12 +285,12 @@ export default function App() {
 
     const handleDisconnectUser = (id: string, name: string) => {
         connections.disconnect(id);
-        Alert.alert('Disconnected', `You are no longer connected with ${name}.`);
+        showAlert('Disconnected', `You are no longer connected with ${name}.`);
     };
 
     const handleBlockUser = (id: string, name: string) => {
         connections.block(id);
-        Alert.alert('Blocked', `${name} has been blocked.`);
+        showAlert('Blocked', `${name} has been blocked.`);
     };
 
     // Bookings state
@@ -678,7 +680,7 @@ export default function App() {
         const handleDeleteAccount = async () => {
             const { error } = await auth.deleteAccount();
             if (error) {
-                Alert.alert('Error', error);
+                showAlert('Error', error);
                 return;
             }
             setIsOnboarding(true);
@@ -744,7 +746,7 @@ export default function App() {
                                     prompts: data.prompts,
                                 });
                                 if (error) {
-                                    Alert.alert('Error', error);
+                                    showAlert('Error', error);
                                     return;
                                 }
                                 setProfileScreen('main');
@@ -818,10 +820,10 @@ export default function App() {
                             onSave={async (currentPassword, newPassword) => {
                                 const { error } = await auth.updatePassword(currentPassword, newPassword);
                                 if (error) {
-                                    Alert.alert('Error', error);
+                                    showAlert('Error', error);
                                     return;
                                 }
-                                Alert.alert('Success', 'Your password has been updated.');
+                                showAlert('Success', 'Your password has been updated.');
                                 setProfileScreen('settings');
                             }}
                             isDarkMode={theme === 'dark'}
@@ -836,10 +838,10 @@ export default function App() {
                             onSave={async (newEmail, currentPassword) => {
                                 const { error } = await auth.updateEmail(currentPassword, newEmail);
                                 if (error) {
-                                    Alert.alert('Error', error);
+                                    showAlert('Error', error);
                                     return;
                                 }
-                                Alert.alert('Check your inbox', 'Confirm the change from a link sent to your new email address.');
+                                showAlert('Check your inbox', 'Confirm the change from a link sent to your new email address.');
                                 setProfileScreen('settings');
                             }}
                             isDarkMode={theme === 'dark'}
@@ -1089,7 +1091,7 @@ export default function App() {
                             const { error, needsVerification } = await auth.signUp(email, password);
                             setAuthLoading(false);
                             if (error) {
-                                Alert.alert('Sign Up Error', error);
+                                showAlert('Sign Up Error', error);
                                 return;
                             }
                             setOnboardingEmail(email);
@@ -1112,7 +1114,7 @@ export default function App() {
                             const { error } = await auth.verifyOtp(onboardingEmail, code);
                             setAuthLoading(false);
                             if (error) {
-                                Alert.alert('Verification Error', error);
+                                showAlert('Verification Error', error);
                                 return;
                             }
                             // OTP verified — now sign in to get session
@@ -1124,7 +1126,7 @@ export default function App() {
                         onResendCode={async () => {
                             const { error } = await auth.resendOtp(onboardingEmail);
                             if (error) {
-                                Alert.alert('Resend Error', error);
+                                showAlert('Resend Error', error);
                             }
                         }}
                         onPhoneVerify={() => setOnboardingScreen('phone-input')}
@@ -1157,10 +1159,10 @@ export default function App() {
                         onSendCode={async (email) => {
                             const { error } = await auth.resetPassword(email);
                             if (error) {
-                                Alert.alert('Reset Error', error);
+                                showAlert('Reset Error', error);
                                 return;
                             }
-                            Alert.alert('Email Sent', 'Check your email for the password reset link.');
+                            showAlert('Email Sent', 'Check your email for the password reset link.');
                             setOnboardingScreen('sign-in');
                         }}
                     />
@@ -1199,7 +1201,7 @@ export default function App() {
                             const { error, needsProfile } = await auth.signIn(email, password);
                             setAuthLoading(false);
                             if (error) {
-                                Alert.alert('Sign In Error', error);
+                                showAlert('Sign In Error', error);
                                 return;
                             }
                             if (needsProfile) {
@@ -1249,7 +1251,7 @@ export default function App() {
                                 });
                                 setAuthLoading(false);
                                 if (error) {
-                                    Alert.alert('Profile Error', error);
+                                    showAlert('Profile Error', error);
                                     return;
                                 }
                             }
@@ -1274,7 +1276,10 @@ export default function App() {
                     <TutorProofUploadScreen
                         courses={onboardingTutorCourses.length > 0 ? onboardingTutorCourses : onboardingCourses}
                         onBack={() => setOnboardingScreen('tutor-course-application')}
-                        onContinue={() => setOnboardingScreen('tutor-pricing-setup')}
+                        onContinue={(proofs) => {
+                            setOnboardingTutorProofs(proofs);
+                            setOnboardingScreen('tutor-pricing-setup');
+                        }}
                     />
                 </FadeTransition>
 
@@ -1302,6 +1307,7 @@ export default function App() {
                                         courseCode: code,
                                         groupPrice: pricing.groupPrice ?? null,
                                         individualPrice: pricing.individualPrice ?? null,
+                                        proofUrl: onboardingTutorProofs[code],
                                     };
                                 });
 
@@ -1319,7 +1325,7 @@ export default function App() {
                                 });
                                 setAuthLoading(false);
                                 if (error) {
-                                    Alert.alert('Profile Error', error);
+                                    showAlert('Profile Error', error);
                                     return;
                                 }
                             }

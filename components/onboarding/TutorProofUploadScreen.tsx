@@ -1,36 +1,81 @@
-import { View, Text, TouchableOpacity, ScrollView, Image } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, Alert, ActivityIndicator } from 'react-native';
 import { ArrowLeft, Upload, FileText, X, Check } from 'lucide-react-native';
 import { useState } from 'react';
+import * as DocumentPicker from 'expo-document-picker';
 import { SkeuomorphicCoursePicker } from '../ui/SkeuomorphicCoursePicker';
+import { supabase } from '../../lib/supabase';
+import { uploadTutorProof } from '../../lib/storage';
 
 interface TutorProofUploadScreenProps {
     courses: string[];
     onBack: () => void;
-    onContinue: () => void;
+    onContinue: (proofs: Record<string, string>) => void;
 }
 
 type UploadedFile = {
     course: string;
     fileName: string;
     fileType: string;
+    path: string;
 };
 
 export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorProofUploadScreenProps) {
     const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
     const [selectedCourse, setSelectedCourse] = useState(courses[0] || '');
+    const [uploading, setUploading] = useState(false);
 
-    const handleFileUpload = () => {
-        // Mock file upload
-        const newFile = {
-            course: selectedCourse,
-            fileName: `proof_${Date.now()}.pdf`,
-            fileType: 'application/pdf',
-        };
-        setUploadedFiles([...uploadedFiles, newFile]);
+    const handleFileUpload = async () => {
+        const result = await DocumentPicker.getDocumentAsync({
+            type: ['application/pdf', 'image/*'],
+            copyToCacheDirectory: true,
+        });
+        if (result.canceled || !result.assets?.[0]) return;
+        const asset = result.assets[0];
+
+        const isPdf = asset.mimeType === 'application/pdf';
+        const isImage = asset.mimeType?.startsWith('image/');
+        if (!isPdf && !isImage) {
+            Alert.alert('Unsupported File', 'Please select a PDF or an image file.');
+            return;
+        }
+
+        setUploading(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('Not authenticated');
+
+            const path = await uploadTutorProof(user.id, selectedCourse, asset.uri);
+            setUploadedFiles((prev) => [
+                ...prev,
+                {
+                    course: selectedCourse,
+                    fileName: asset.name || path.split('/').pop() || 'proof',
+                    fileType: asset.mimeType || 'application/octet-stream',
+                    path,
+                },
+            ]);
+        } catch (e) {
+            console.error('Proof upload error:', e);
+            Alert.alert('Upload Failed', 'Could not upload the file. Please try again.');
+        } finally {
+            setUploading(false);
+        }
     };
 
     const removeFile = (index: number) => {
+        const file = uploadedFiles[index];
         setUploadedFiles(uploadedFiles.filter((_, i) => i !== index));
+        if (file?.path) {
+            supabase.storage.from('proofs').remove([file.path]).catch(() => {});
+        }
+    };
+
+    const handleContinue = () => {
+        const proofs: Record<string, string> = {};
+        uploadedFiles.forEach((f) => {
+            proofs[f.course] = f.path;
+        });
+        onContinue(proofs);
     };
 
     const getCourseFileCount = (course: string) => {
@@ -93,13 +138,18 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
                 {/* Upload Area */}
                 <TouchableOpacity
                     onPress={handleFileUpload}
+                    disabled={uploading}
                     className="mb-6 p-8 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl items-center justify-center bg-gray-50 dark:bg-gray-800"
                 >
                     <View className="w-16 h-16 bg-red-50 rounded-full items-center justify-center mb-3">
-                        <Upload size={32} color="#db2321" />
+                        {uploading ? (
+                            <ActivityIndicator size="small" color="#db2321" />
+                        ) : (
+                            <Upload size={32} color="#db2321" />
+                        )}
                     </View>
                     <Text className="text-base font-semibold text-gray-900 dark:text-white mb-1">
-                        Upload file for {selectedCourse}
+                        {uploading ? 'Uploading…' : `Upload file for ${selectedCourse}`}
                     </Text>
                     <Text className="text-sm text-gray-500">
                         PDF, PNG, JPG up to 10MB
@@ -178,7 +228,7 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
             {/* Continue Button */}
             <View className="p-4 border-t border-gray-200 dark:border-gray-800">
                 <TouchableOpacity
-                    onPress={onContinue}
+                    onPress={handleContinue}
                     className="w-full py-4 bg-red-600 rounded-full shadow-sm"
                 >
                     <Text className="text-center text-white text-base font-semibold">
