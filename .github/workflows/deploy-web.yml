@@ -30,7 +30,7 @@ jobs:
       - run: npm ci
 
       - name: Export web build
-        run: npx expo export -p web
+        run: npm run build:web
         env:
           # Defaults to demo mode until real Supabase secrets are added to the repo.
           EXPO_PUBLIC_DEMO_MODE: ${{ vars.EXPO_PUBLIC_DEMO_MODE || 'true' }}

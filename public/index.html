@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>%WEB_TITLE%</title>
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="studysesh" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="/studysesh/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/studysesh/icons/apple-touch-icon.png" />
+    <script>
+      (function () {
+        var APP_PATH = '/studysesh/';
+        // GitHub Pages serves public files under /studysesh/. The Expo dev
+        // server serves them from the origin root, and dev routes stay at /.
+        function isManifest(body, ok) {
+          return ok && body.trim().charAt(0) === '{';
+        }
+        function setLink(rel, href) {
+          var existing = document.querySelector('link[rel="' + rel + '"]');
+          if (existing) existing.remove();
+          var link = document.createElement('link');
+          link.rel = rel;
+          link.href = href;
+          document.head.appendChild(link);
+        }
+        function register(assetPrefix) {
+          // Dev (`expo start --web`) does not mount routes under baseUrl, so the
+          // installable app is the origin root. Production is hosted at /studysesh/.
+          var production = assetPrefix === APP_PATH;
+          var scope = production ? APP_PATH : '/';
+          setLink('manifest', assetPrefix + (production ? 'manifest.webmanifest' : 'manifest-dev.webmanifest'));
+          setLink('apple-touch-icon', assetPrefix + 'icons/apple-touch-icon.png');
+          if (!('serviceWorker' in navigator)) return;
+          var registerWorker = function () {
+            navigator.serviceWorker.register(assetPrefix + 'sw.js', { scope: scope }).catch(function (error) {
+              console.error('Service worker registration failed:', error);
+            });
+          };
+          if (document.readyState === 'complete') registerWorker();
+          else window.addEventListener('load', registerWorker);
+        }
+        fetch(APP_PATH + 'manifest.webmanifest', { cache: 'no-store' })
+          .then(function (response) {
+            return response.text().then(function (body) {
+              register(isManifest(body, response.ok) ? APP_PATH : '/');
+            });
+          })
+          .catch(function () {
+            register('/');
+          });
+      })();
+    </script>
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  </body>
+</html>

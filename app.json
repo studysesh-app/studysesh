@@ -18,7 +18,11 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "studysesh",
+      "themeColor": "#db2321",
+      "backgroundColor": "#ffffff",
+      "description": "Connect with top students. Master your courses. Excel together."
     },
     "experiments": {
       "baseUrl": "/studysesh"
