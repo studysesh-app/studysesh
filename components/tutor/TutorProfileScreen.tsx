@@ -1,9 +1,12 @@
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { User, Settings, BookOpen, LogOut, ChevronRight, Users, DollarSign } from 'lucide-react-native';
+import { showConfirm } from '../../lib/alert';
 
 interface TutorProfileScreenProps {
     tutorName: string;
     tutorInitial: string;
+    /** Year + program (or email) shown under the name. */
+    subtitle?: string;
     role: string;
     connectionsCount?: number;
 
@@ -19,6 +22,7 @@ interface TutorProfileScreenProps {
 export function TutorProfileScreen({
     tutorName,
     tutorInitial,
+    subtitle,
     role,
     connectionsCount = 0,
     onEditProfile,
@@ -38,15 +42,17 @@ export function TutorProfileScreen({
     ];
 
     const handleLogout = () => {
-        Alert.alert(
-            'Log Out',
-            'Are you sure you want to log out?',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Log Out', style: 'destructive', onPress: onLogout },
-            ]
-        );
+        showConfirm({
+            title: 'Log Out',
+            message: 'Are you sure you want to log out?',
+            confirmText: 'Log Out',
+            destructive: true,
+            onConfirm: onLogout,
+        });
     };
+
+    // In dark mode the menu icons use the same pastel-pink / dark-red pairing as the avatar.
+    const iconColor = isDarkMode ? '#991b1b' : '#db2321';
 
     return (
         <ScrollView className={`flex-1 ${isDarkMode ? 'bg-gray-900' : 'bg-white'}`}>
@@ -55,7 +61,9 @@ export function TutorProfileScreen({
                     <Text style={styles.avatarText}>{tutorInitial}</Text>
                 </View>
                 <Text style={[styles.nameText, isDarkMode && styles.textDark]}>{tutorName}</Text>
-                <Text style={[styles.emailText, isDarkMode && styles.textGrayDark]}>3rd Year Computer Science</Text>
+                {subtitle ? (
+                    <Text style={[styles.emailText, isDarkMode && styles.textGrayDark]}>{subtitle}</Text>
+                ) : null}
 
             </View>
 
@@ -71,7 +79,7 @@ export function TutorProfileScreen({
                                 activeOpacity={0.8}
                             >
                                 <View style={[styles.iconContainer, isDarkMode && styles.iconContainerDark]}>
-                                    <Icon size={20} color="#db2321" />
+                                    <Icon size={20} color={iconColor} />
                                 </View>
                                 <Text style={[styles.menuLabel, isDarkMode && styles.textDark]}>{item.label}</Text>
                                 {item.badge && (
@@ -80,7 +88,7 @@ export function TutorProfileScreen({
                                     </View>
                                 )}
                                 <View style={[styles.chevronContainer, isDarkMode && styles.iconContainerDark]}>
-                                    <ChevronRight size={16} color="#db2321" />
+                                    <ChevronRight size={16} color={iconColor} />
                                 </View>
                             </TouchableOpacity>
                         );
@@ -200,7 +208,7 @@ const styles = StyleSheet.create({
         marginRight: 14,
     },
     iconContainerDark: {
-        backgroundColor: '#450a0a',
+        backgroundColor: '#fee2e2', // same pastel pink as the avatar circle
     },
     menuLabel: {
         flex: 1,

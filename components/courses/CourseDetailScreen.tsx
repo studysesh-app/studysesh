@@ -6,22 +6,10 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 import { TutorCard } from '../TutorCard';
 import { AnimatedTabs, TabData } from '../../reference/AnimatedTabs';
-import { PostDetailScreen } from './PostDetailScreen';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 type PostType = 'post' | 'question';
-
-interface Comment {
-    id: string;
-    authorName: string;
-    authorInitial: string;
-    authorYear: string;
-    timestamp: string;
-    content: string;
-    likes: number;
-    isLiked: boolean;
-}
 
 interface BoardPost {
     id: string;
@@ -78,31 +66,6 @@ export function CourseDetailScreen({
     const [activeTabIndex, setActiveTabIndex] = useState(0);
     const [newPostContent, setNewPostContent] = useState('');
     const [isQuestion, setIsQuestion] = useState(false);
-    const [selectedPost, setSelectedPost] = useState<BoardPost | null>(null);
-
-    // Mock comments for the selected post
-    const [mockComments] = useState<Comment[]>([
-        {
-            id: 'c1',
-            authorName: 'Alex Kim',
-            authorInitial: 'A',
-            authorYear: '3rd Year',
-            timestamp: '1h ago',
-            content: 'I have the notes! DM me and I can share them with you.',
-            likes: 3,
-            isLiked: false,
-        },
-        {
-            id: 'c2',
-            authorName: 'Jordan Lee',
-            authorInitial: 'J',
-            authorYear: '2nd Year',
-            timestamp: '45m ago',
-            content: 'The prof posted the slides on Brightspace, check the announcements!',
-            likes: 5,
-            isLiked: true,
-        },
-    ]);
 
     // Swipe gesture for back navigation and tab switching
     const translateX = useSharedValue(0);
@@ -186,7 +149,7 @@ export function CourseDetailScreen({
     };
 
     const handlePostPress = (post: BoardPost) => {
-        setSelectedPost(post);
+        onCommentPost(post.id);
     };
 
     // No longer conditionally returning - we render both and overlay PostDetailScreen
@@ -416,30 +379,6 @@ export function CourseDetailScreen({
                     </ScrollView>
                 </Animated.View>
             </GestureDetector>
-
-            {/* PostDetailScreen overlay - rendered on top when a post is selected */}
-            {selectedPost && (
-                <View style={styles.overlayContainer}>
-                    <PostDetailScreen
-                        postId={selectedPost.id}
-                        authorName={selectedPost.authorName}
-                        authorInitial={selectedPost.authorInitial}
-                        authorYear={selectedPost.authorYear}
-                        timestamp={selectedPost.timestamp}
-                        content={selectedPost.content}
-                        likes={selectedPost.likes}
-                        comments={mockComments}
-                        isLiked={selectedPost.isLiked}
-                        type={selectedPost.type}
-                        onBack={() => setSelectedPost(null)}
-                        onLikePost={() => onLikePost(selectedPost.id)}
-                        onLikeComment={(commentId) => console.log('Like comment:', commentId)}
-                        onAddComment={(content) => console.log('Add comment:', content)}
-                        onViewProfile={onViewProfile}
-                        isDarkMode={isDarkMode}
-                    />
-                </View>
-            )}
         </View>
     );
 }

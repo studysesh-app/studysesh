@@ -172,7 +172,7 @@ export function TermsOfServiceScreen({ onBack, isDarkMode = false }: TermsOfServ
                                     11. Contact
                                 </Text>
                                 <Text className={`text-base ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                                    Questions about these Terms of Service? Contact us at ksmavai2005@gmail.com
+                                    Questions about these Terms of Service? Contact us at studysesh.cu@gmail.com
                                 </Text>
                             </View>
                         </View>

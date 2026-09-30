@@ -1,6 +1,7 @@
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions, ScrollView, Animated as RNAnimated, Alert } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions, ScrollView, Animated as RNAnimated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRef, useState } from 'react';
+import { showConfirm } from '../../lib/alert';
 
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -82,46 +83,41 @@ export function ProfileCard({
 
     const handleDisconnectAction = () => {
         setMenuVisible(false);
-        // Small delay to allow menu to close before alert, optional but good for UI
+        // Small delay to allow menu to close before the dialog appears
         setTimeout(() => {
-            Alert.alert(
-                'Disconnect',
-                `Are you sure you want to disconnect from ${name}?`,
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Disconnect', style: 'destructive', onPress: onDisconnect }
-                ]
-            );
+            showConfirm({
+                title: 'Disconnect',
+                message: `Are you sure you want to disconnect from ${name}?`,
+                confirmText: 'Disconnect',
+                destructive: true,
+                onConfirm: () => onDisconnect?.(),
+            });
         }, 100);
     };
 
     const handleBlockAction = () => {
         setMenuVisible(false);
         setTimeout(() => {
-            Alert.alert(
-                'Block User',
-                `Are you sure you want to block ${name}?`,
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Block', style: 'destructive', onPress: onBlock }
-                ]
-            );
+            showConfirm({
+                title: 'Block User',
+                message: `Are you sure you want to block ${name}?`,
+                confirmText: 'Block',
+                destructive: true,
+                onConfirm: () => onBlock?.(),
+            });
         }, 100);
     };
 
     const handleReportAction = () => {
         setMenuVisible(false);
         setTimeout(() => {
-            Alert.alert(
-                'Report User',
-                `Why are you reporting ${name}?`,
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Inappropriate Content', onPress: () => onReport?.() },
-                    { text: 'Harassment', onPress: () => onReport?.() },
-                    { text: 'Spam', onPress: () => onReport?.() },
-                ]
-            );
+            showConfirm({
+                title: 'Report User',
+                message: `Report ${name} for inappropriate content, harassment, or spam?`,
+                confirmText: 'Report',
+                destructive: true,
+                onConfirm: () => onReport?.(),
+            });
         }, 100);
     };
 
@@ -137,8 +133,8 @@ export function ProfileCard({
                     {photoUrl ? (
                         <Image source={{ uri: photoUrl }} style={styles.photo} resizeMode="cover" />
                     ) : (
-                        <View style={styles.photoPlaceholder}>
-                            <Text style={styles.initials}>{initials}</Text>
+                        <View style={[styles.photoPlaceholder, isDarkMode && styles.photoPlaceholderDark]}>
+                            <Text style={[styles.initials, isDarkMode && styles.initialsDark]}>{initials}</Text>
                         </View>
                     )}
                     {/* Gradient overlay for text readability */}
@@ -235,7 +231,7 @@ export function ProfileCard({
                             {isFriend && <View style={[styles.menuSeparator, isDarkMode && styles.menuSeparatorDark]} />}
 
                             <TouchableOpacity style={styles.menuItem} onPress={handleReportAction}>
-                                <Text style={styles.menuItemText}>Report</Text>
+                                <Text style={[styles.menuItemText, isDarkMode && styles.menuItemTextDark]}>Report</Text>
                             </TouchableOpacity>
                             <View style={[styles.menuSeparator, isDarkMode && styles.menuSeparatorDark]} />
 
@@ -490,6 +486,15 @@ const styles = StyleSheet.create({
     },
     menuSeparatorDark: {
         backgroundColor: '#374151',
+    },
+    menuItemTextDark: {
+        color: '#f3f4f6',
+    },
+    photoPlaceholderDark: {
+        backgroundColor: '#374151',
+    },
+    initialsDark: {
+        color: '#d1d5db',
     },
 });
 

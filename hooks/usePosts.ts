@@ -27,6 +27,7 @@ export interface BoardComment {
     content: string;
     likes: number;
     isLiked: boolean;
+    parentId: string | null;
 }
 
 /** Board posts/comments/likes for a single course. */
@@ -128,7 +129,7 @@ export function usePosts(courseCode: string | null, userId: string | null) {
             if (DEMO_MODE) return [];
             const { data: rows } = await supabase
                 .from('comments')
-                .select('id, author_id, content, created_at, users(name, year), comment_likes(user_id)')
+                .select('id, author_id, parent_id, content, created_at, users(name, year), comment_likes(user_id)')
                 .eq('post_id', postId)
                 .order('created_at', { ascending: true });
 
@@ -142,16 +143,22 @@ export function usePosts(courseCode: string | null, userId: string | null) {
                 content: r.content,
                 likes: (r.comment_likes ?? []).length,
                 isLiked: (r.comment_likes ?? []).some((l: any) => l.user_id === userId),
+                parentId: r.parent_id ?? null,
             }));
         },
         [userId]
     );
 
     const addComment = useCallback(
-        async (postId: string, content: string) => {
+        async (postId: string, content: string, parentId?: string | null) => {
             if (DEMO_MODE || !userId) return;
             const post = posts.find((p) => p.id === postId);
-            const { error } = await supabase.from('comments').insert({ post_id: postId, author_id: userId, content });
+            const { error } = await supabase.from('comments').insert({
+                post_id: postId,
+                author_id: userId,
+                content,
+                parent_id: parentId ?? null,
+            });
             if (error) {
                 console.error('Add comment error:', error);
                 return;

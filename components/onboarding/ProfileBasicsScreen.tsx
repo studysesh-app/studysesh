@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { SkeuomorphicCoursePicker } from '../ui/SkeuomorphicCoursePicker';
 import { PronounSelector } from '../ui/PronounSelector';
+import { DEMO_MODE } from '../../lib/demo';
 
 // Enable LayoutAnimation for Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -22,6 +23,7 @@ interface ProfileBasicsScreenProps {
         profileVisibility?: 'everyone' | 'women-nb-only';
         profileImage?: string | null;
     }) => void;
+    isDarkMode?: boolean;
 }
 
 const GENDER_OPTIONS = [
@@ -48,7 +50,7 @@ const VISIBILITY_OPTIONS = [
     { label: 'Women & Non-Binary only', value: 'women-nb-only' },
 ];
 
-export function ProfileBasicsScreen({ onBack, onContinue }: ProfileBasicsScreenProps) {
+export function ProfileBasicsScreen({ onBack, onContinue, isDarkMode = false }: ProfileBasicsScreenProps) {
     const [name, setName] = useState('');
     const [pronouns, setPronouns] = useState<string[]>([]);
     const [gender, setGender] = useState<string[]>([]); // Array for PronounSelector compatibility
@@ -103,22 +105,20 @@ export function ProfileBasicsScreen({ onBack, onContinue }: ProfileBasicsScreenP
         }
     };
 
-    const isValid = name.trim() && pronouns.length > 0 && gender.length > 0 && year && degreeLevel && major.trim();
+    const isValid = !!(name.trim() && pronouns.length > 0 && gender.length > 0 && year && degreeLevel && major.trim());
 
     const handleContinue = () => {
-        // DEV: bypassed validation for testing (was: if (isValid))
-        if (true) {
-            onContinue({
-                name: name.trim() || 'Test User', // DEV: fallback
-                pronouns: pronouns.length > 0 ? pronouns : ['they/them'], // DEV: fallback
-                gender: gender[0] || 'Prefer not to say', // DEV: fallback
-                year: year || '1st Year', // DEV: fallback
-                degreeLevel: degreeLevel || "Bachelor's", // DEV: fallback
-                major: major.trim() || 'Computer Science', // DEV: fallback
-                profileVisibility: showVisibilityOption ? (profileVisibility[0] as 'everyone' | 'women-nb-only') : undefined,
-                profileImage: image
-            });
-        }
+        if (!DEMO_MODE && !isValid) return;
+        onContinue({
+            name: name.trim() || (DEMO_MODE ? 'Test User' : ''),
+            pronouns: pronouns.length > 0 ? pronouns : (DEMO_MODE ? ['They', 'Them'] : []),
+            gender: gender[0] || (DEMO_MODE ? 'Prefer not to say' : ''),
+            year: year || (DEMO_MODE ? '1st Year' : ''),
+            degreeLevel: degreeLevel || (DEMO_MODE ? "Bachelor's" : ''),
+            major: major.trim() || (DEMO_MODE ? 'Computer Science' : ''),
+            profileVisibility: showVisibilityOption ? (profileVisibility[0] as 'everyone' | 'women-nb-only') : undefined,
+            profileImage: image
+        });
     };
 
     // Scroll to input when focused - scrolls to end to ensure visibility
@@ -204,6 +204,7 @@ export function ProfileBasicsScreen({ onBack, onContinue }: ProfileBasicsScreenP
                             options={PRONOUN_OPTIONS}
                             selectedValues={pronouns}
                             onSelect={setPronouns}
+                            isDarkMode={isDarkMode}
                         />
                     </View>
 
@@ -216,6 +217,7 @@ export function ProfileBasicsScreen({ onBack, onContinue }: ProfileBasicsScreenP
                             options={GENDER_OPTIONS}
                             selectedValues={gender}
                             onSelect={handleGenderSelect}
+                            isDarkMode={isDarkMode}
                         />
                     </View>
 
@@ -235,6 +237,7 @@ export function ProfileBasicsScreen({ onBack, onContinue }: ProfileBasicsScreenP
                                 options={VISIBILITY_OPTIONS}
                                 selectedValues={profileVisibility}
                                 onSelect={handleVisibilitySelect}
+                                isDarkMode={isDarkMode}
                             />
                         </View>
                     )}
@@ -249,6 +252,7 @@ export function ProfileBasicsScreen({ onBack, onContinue }: ProfileBasicsScreenP
                             selectedValue={year}
                             onValueChange={(itemValue: string) => setYear(itemValue)}
                             placeholder="Select year"
+                            isDarkMode={isDarkMode}
                         />
                     </View>
 
@@ -262,6 +266,7 @@ export function ProfileBasicsScreen({ onBack, onContinue }: ProfileBasicsScreenP
                             selectedValue={degreeLevel}
                             onValueChange={(itemValue: string) => setDegreeLevel(itemValue)}
                             placeholder="Select degree"
+                            isDarkMode={isDarkMode}
                         />
                     </View>
 
@@ -290,9 +295,8 @@ export function ProfileBasicsScreen({ onBack, onContinue }: ProfileBasicsScreenP
                 <View className="absolute bottom-0 left-0 right-0 p-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
                     <TouchableOpacity
                         onPress={handleContinue}
-                        disabled={false} // DEV: bypassed for testing
-                        className={`w-full py-4 rounded-full shadow-sm ${isValid ? 'bg-red-600' : 'bg-red-600' // DEV: always red for testing
-                            }`}
+                        disabled={!DEMO_MODE && !isValid}
+                        className={`w-full py-4 rounded-full shadow-sm ${DEMO_MODE || isValid ? 'bg-red-600' : 'bg-gray-300'}`}
                     >
                         <Text className="text-center text-white text-base font-semibold">
                             Continue

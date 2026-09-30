@@ -64,6 +64,9 @@ interface EditProfileScreenProps {
     name: string;
     pronouns: string;
     year: string;
+    degreeLevel?: string;
+    gender?: string;
+    profileVisibility?: 'everyone' | 'women-nb-only';
     program: string;
     bio?: string;
     initial: string;
@@ -89,6 +92,9 @@ export function EditProfileScreen({
     name: initialName,
     pronouns: initialPronouns,
     year: initialYear,
+    degreeLevel: initialDegreeLevel = '',
+    gender: initialGender = '',
+    profileVisibility: initialProfileVisibility,
     program: initialProgram,
     bio: initialBio,
     initial,
@@ -110,12 +116,14 @@ export function EditProfileScreen({
 
     const [name, setName] = useState(initialName);
     const [pronouns, setPronouns] = useState<string[]>(parsePronouns(initialPronouns));
-    const [gender, setGender] = useState<string[]>([]); // Will be set from props if available
+    const [gender, setGender] = useState<string[]>(initialGender ? [initialGender] : []);
     const [year, setYear] = useState(initialYear);
-    const [degreeLevel, setDegreeLevel] = useState('');
+    const [degreeLevel, setDegreeLevel] = useState(initialDegreeLevel);
     const [program, setProgram] = useState(initialProgram);
     const [bio, setBio] = useState(initialBio || '');
-    const [profileVisibility, setProfileVisibility] = useState<string[]>(['everyone']);
+    const [profileVisibility, setProfileVisibility] = useState<string[]>(
+        initialProfileVisibility ? [initialProfileVisibility] : ['everyone']
+    );
     const [prompts, setPrompts] = useState<Array<{ prompt: string; answer: string }>>([]);
     const [profileImage, setProfileImage] = useState<string | null>(initialProfileImage || null);
 

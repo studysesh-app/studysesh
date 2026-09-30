@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, LogBox } from 'react-native';
+import { View, LogBox, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { showAlert } from '../lib/alert';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -13,7 +14,10 @@ import { useClassmates } from '../hooks/useClassmates';
 import { useChat } from '../hooks/useChat';
 import { uploadAvatar } from '../lib/storage';
 import { supabase } from '../lib/supabase';
-import { DEMO_MODE } from '../lib/demo';
+import { DEMO_MODE, displayName } from '../lib/demo';
+import { openSupportEmail } from '../lib/support';
+import { ThemeProvider } from '../lib/theme';
+import { colorScheme as nativewindColorScheme } from 'nativewind';
 
 // Suppress SafeAreaView deprecation warning from Expo's internal packages
 // We've already migrated all our code to use react-native-safe-area-context
@@ -23,7 +27,6 @@ LogBox.ignoreLogs(['SafeAreaView has been deprecated']);
 import { NewNavigationTabs } from '../components/NewNavigationTabs';
 import { ChatListScreen } from '../components/ChatListScreen';
 import { IndividualChatScreen, Message } from '../components/IndividualChatScreen';
-import { NotificationsScreen } from '../components/NotificationsScreen';
 import { OnboardingToAppTransition } from '../components/OnboardingToAppTransition';
 
 // New social features
@@ -67,7 +70,6 @@ import { TutorPricingSetupScreen } from '../components/onboarding/TutorPricingSe
 import { TutorOnboardingSuccessScreen } from '../components/onboarding/TutorOnboardingSuccessScreen';
 import { TutorProofUploadScreen } from '../components/onboarding/TutorProofUploadScreen';
 import { ForgotPasswordScreen } from '../components/onboarding/ForgotPasswordScreen';
-import { PhoneInputScreen } from '../components/onboarding/PhoneInputScreen';
 import { StudentProfileScreen } from '../components/StudentProfileScreen';
 import { StudentProfileModal } from '../components/classmates/StudentProfileModal';
 
@@ -104,27 +106,7 @@ type OnboardingScreen =
     | 'tutor-proof-upload'
     | 'tutor-pricing-setup'
     | 'tutor-success'
-    | 'forgot-password'
-    | 'phone-input'
-    | 'code-verification-phone';
-
-type Booking = {
-    id: string;
-    tutorName?: string;
-    tutorInitial?: string;
-    studentName?: string;
-    studentInitial?: string;
-    course: string;
-    date: string;
-    time: string;
-    location: string;
-    sessionType: 'group' | 'individual';
-    price?: string;
-    earnings?: string;
-    status: 'Pending' | 'Confirmed' | 'Completed';
-    studentsJoined?: number;
-    maxStudents?: number;
-};
+    | 'forgot-password';
 
 export default function App() {
     // Auth hook
@@ -175,15 +157,19 @@ export default function App() {
 
     // Real profile data (single profile shared across student/tutor views since is_tutor is one flag on one profile)
     const studentProfile = {
-        name: auth.profile?.name ?? 'Student',
+        name: displayName(auth.profile?.name),
         pronouns: (auth.profile?.pronouns ?? ['He', 'Him']).join('/'),
         year: auth.profile?.year ?? '',
+        degreeLevel: auth.profile?.degree_level ?? '',
+        gender: auth.profile?.gender ?? '',
+        profileVisibility: (auth.profile?.profile_visibility ?? 'everyone') as 'everyone' | 'women-nb-only',
         program: auth.profile?.major ?? '',
         bio: auth.profile?.bio ?? '',
         photoUrl: auth.profile?.photo_url ?? null,
     };
 
     const tutorProfile = studentProfile;
+    const profileSubtitle = [studentProfile.year, studentProfile.program].filter(Boolean).join(' ');
 
     const handleViewProfile = (profileId: string) => {
         // Search classmates first, then connections (accepted friends may no longer appear as "classmates")
@@ -216,19 +202,6 @@ export default function App() {
     // Role toggle state
     const [userRole, setUserRole] = useState<UserRole>('student');
     const [activeTutorTab, setActiveTutorTab] = useState<TutorTabValue>('home');
-    const [tutorBookingTabIndex, setTutorBookingTabIndex] = useState(0);
-
-    const [highlightedBookingId, setHighlightedBookingId] = useState<string | null>(null);
-
-    // Clear highlighted booking after navigation
-    useEffect(() => {
-        if (highlightedBookingId) {
-            const timer = setTimeout(() => {
-                setHighlightedBookingId(null);
-            }, 3000); // Clear after 3 seconds
-            return () => clearTimeout(timer);
-        }
-    }, [highlightedBookingId]);
     const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
     const boardPosts = usePosts(selectedCourse, currentUserId);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
@@ -293,77 +266,14 @@ export default function App() {
         showAlert('Blocked', `${name} has been blocked.`);
     };
 
-    // Bookings state
-    const [bookings, setBookings] = useState<Booking[]>([
-        {
-            id: '1',
-            tutorName: 'Sarah Chen',
-            tutorInitial: 'SC',
-            studentName: 'Alex Martinez',
-            studentInitial: 'A',
-            course: 'SYSC 2006',
-            date: 'Nov 20, 2024',
-            time: '2:00 PM',
-            sessionType: 'group',
-            status: 'Confirmed',
-            location: 'online',
-            earnings: '$15.00',
-            price: '$15'
-        },
-        {
-            id: '2',
-            tutorName: 'Marcus Johnson',
-            tutorInitial: 'MJ',
-            studentName: 'Maya Patel',
-            studentInitial: 'M',
-            course: 'MATH 1004',
-            date: 'Tomorrow',
-            time: '2:00 PM',
-            sessionType: 'individual',
-            status: 'Confirmed',
-            location: 'online',
-            earnings: '$30.00',
-            price: '$30'
-        },
-        {
-            id: '3',
-            tutorName: 'Emily Rodriguez',
-            tutorInitial: 'ER',
-            studentName: 'Jordan Kim',
-            studentInitial: 'J',
-            course: 'SYSC 2006',
-            date: 'Nov 22, 2024',
-            time: '3:00 PM',
-            sessionType: 'group',
-            status: 'Pending',
-            location: 'Science Building',
-            earnings: '$18.00',
-            price: '$18'
-        }
-    ]);
-
-    // Notifications state
-    const [showNotifications, setShowNotifications] = useState(false);
-    const [notifications, setNotifications] = useState<any[]>([
-        {
-            id: '1',
-            type: 'accepted',
-            title: 'Booking Accepted',
-            message: 'Sarah Chen accepted your booking for SYSC 2006 on Nov 20',
-            timestamp: '2h ago',
-            isUnread: true,
-            data: { bookingId: '1' }
-        },
-        {
-            id: '2',
-            type: 'reminder',
-            title: 'Session Tomorrow',
-            message: 'Reminder: You have a session with Marcus Johnson tomorrow at 2:00 PM',
-            timestamp: 'Yesterday',
-            isUnread: false,
-            data: { bookingId: '2' }
-        }
-    ]);
+    const handleReportUser = (id: string, name: string) => {
+        connections.report(id, 'Reported from Connect');
+        openSupportEmail(
+            `Report: ${name}`,
+            `I would like to report ${name} (user id: ${id}).\n\nReason:\n`
+        );
+        showAlert('Report submitted', 'Thanks — we received your report.');
+    };
 
     // Chat state — backed by the real-data useChat hook (see top of component).
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
@@ -377,8 +287,53 @@ export default function App() {
     const myTutoringCourses = courses.tutoringCourses;
     const [tutorPricingSessionType, setTutorPricingSessionType] = useState<'online' | 'in-person' | 'both'>('both');
     const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+    // Restore locally-saved theme immediately (survives even if the profile row has no theme column).
+    useEffect(() => {
+        AsyncStorage.getItem('studysesh-theme').then((saved) => {
+            if (saved === 'light' || saved === 'dark') setTheme(saved);
+        }).catch(() => {});
+    }, []);
+
+    // Restore the saved theme whenever a profile loads (login, reload, profile refresh).
+    useEffect(() => {
+        const saved = auth.profile?.theme;
+        if (saved === 'light' || saved === 'dark') {
+            setTheme(saved);
+        }
+    }, [auth.profile?.theme]);
+
+    // Keep NativeWind's `dark:` variants in sync with the in-app theme.
+    useEffect(() => {
+        try {
+            nativewindColorScheme.set(theme);
+        } catch (e) {
+            console.warn('Could not apply colour scheme:', e);
+        }
+        if (Platform.OS === 'web' && typeof document !== 'undefined') {
+            document.documentElement.classList.toggle('dark', theme === 'dark');
+        }
+    }, [theme]);
+
+    const handleThemeChange = (newTheme: 'light' | 'dark') => {
+        setTheme(newTheme);
+        AsyncStorage.setItem('studysesh-theme', newTheme).catch(() => {});
+        auth.updateProfile({ theme: newTheme });
+    };
+
+    const handleLogout = async () => {
+        setIsOnboarding(true);
+        setOnboardingScreen('welcome');
+        setProfileScreen('main');
+        setTheme('light');
+        try {
+            await auth.signOut();
+        } catch (e) {
+            console.warn('Logout failed:', e);
+        }
+    };
     const userProfile = {
-        name: auth.profile?.name ?? 'Student',
+        name: displayName(auth.profile?.name),
         pronouns: (auth.profile?.pronouns ?? ['He', 'Him']).join('/'),
         year: auth.profile?.year ?? '',
         program: auth.profile?.major ?? '',
@@ -389,11 +344,6 @@ export default function App() {
         language: 'English',
     };
 
-    const [paymentMethods, setPaymentMethods] = useState([
-        { id: '1', type: 'card' as const, last4: '4242', brand: 'Visa' },
-    ]);
-
-    // Mock classmates data for social features
     // Real activity/notifications data (from useActivity)
     const activities = activityFeed.activities;
 
@@ -403,58 +353,22 @@ export default function App() {
     // State for new social app tab
     const [socialActiveTab, setSocialActiveTab] = useState<SocialTabValue>('home');
     const currentUserGender = (auth.profile?.gender ?? 'Prefer not to say') as 'Man' | 'Woman' | 'Non-Binary' | 'Prefer not to say';
-    const [userStatus, setUserStatus] = useState('Cramming');
+    const [userStatus, setUserStatus] = useState(auth.profile?.status || 'Studying');
+
+    useEffect(() => {
+        if (auth.profile?.status) setUserStatus(auth.profile.status);
+    }, [auth.profile?.status]);
+
+    const handleStatusChange = (status: string) => {
+        setUserStatus(status);
+        auth.updateProfile({ status });
+    };
 
     // Tutor mode render function
     const renderTutorContent = () => {
-        if (showNotifications) {
-            return (
-                <NotificationsScreen
-                    notifications={notifications}
-                    onBack={() => setShowNotifications(false)}
-                    onMarkAsRead={(id) => {
-                        setNotifications(prev => prev.map(n => n.id === id ? { ...n, isUnread: false } : n));
-                    }}
-                    onNotificationClick={(notification) => {
-                        setShowNotifications(false);
-                        if (notification.data?.bookingId) {
-                            // Find which tab the booking is in
-                            const booking = bookings.find(b => b.id === notification.data.bookingId);
-                            if (booking) {
-                                if (booking.status === 'Confirmed' || booking.status === 'Pending') {
-                                    setTutorBookingTabIndex(1); // Confirmed
-                                } else if (booking.status === 'Completed') {
-                                    setTutorBookingTabIndex(2); // Past
-                                } else {
-                                    setTutorBookingTabIndex(0); // Pending
-                                }
-                                setHighlightedBookingId(booking.id);
-                                setActiveTutorTab('activity');
-                            }
-                        }
-                    }}
-                />
-            );
-        }
-
         switch (activeTutorTab) {
             case 'home':
-                return (
-                    <TutorHomeScreen
-                        tutorName="Jane"
-                        courses={mockCourses}
-                        tutoringCourses={[
-                            { code: 'SYSC 2006', name: 'Systems Programming', activeCount: 8, tutorCount: 1, studentCount: 42 },
-                            { code: 'COMP 1405', name: 'Intro to Computer Science', activeCount: 15, tutorCount: 1, studentCount: 78 },
-                        ]}
-                        onCoursePress={(courseCode) => {
-                            setSelectedCourse(courseCode);
-                        }}
-                        userStatus={userStatus}
-                        onStatusChange={(status) => setUserStatus(status)}
-                        isDarkMode={theme === 'dark'}
-                    />
-                );
+                return renderTutorHome();
             case 'activity':
                 // Use same activity screen as students
                 return (
@@ -480,6 +394,10 @@ export default function App() {
                             // Navigate based on activity type
                             if (activity.type === 'message') {
                                 setActiveTutorTab('chat');
+                                if (activity.referenceId) {
+                                    setSelectedConversationId(activity.referenceId);
+                                    chat.fetchMessages(activity.referenceId);
+                                }
                             } else if (activity.type === 'board_reply' || activity.type === 'board_like') {
                                 if (activity.courseName) {
                                     setSelectedCourse(activity.courseName);
@@ -510,6 +428,7 @@ export default function App() {
                         friends={connectedFriends}
                         onBlock={(id) => handleBlockUser(id, mockClassmates.find(c => c.id === id)?.name || 'User')}
                         onDisconnect={(id) => handleDisconnectUser(id, mockClassmates.find(c => c.id === id)?.name || 'User')}
+                        onReport={handleReportUser}
                         onViewProfile={(profile) => {
                             handleViewProfile(profile.id);
                         }}
@@ -537,6 +456,7 @@ export default function App() {
                     <TutorProfileScreen
                         tutorName={tutorProfile.name}
                         tutorInitial={tutorProfile.name.charAt(0)}
+                        subtitle={profileSubtitle || (auth.profile?.email ?? '')}
                         role="tutor"
                         onEditProfile={() => setProfileScreen('edit-profile')}
                         onEditCourses={() => setProfileScreen('my-courses')}
@@ -544,34 +464,29 @@ export default function App() {
                         onSettings={() => setProfileScreen('settings')}
                         onConnections={() => setProfileScreen('connections')}
                         connectionsCount={connectedFriends.size}
-                        onLogout={async () => {
-                            await auth.signOut();
-                            setIsOnboarding(true);
-                            setOnboardingScreen('welcome');
-                            setTheme('light');
-                        }}
+                        onLogout={handleLogout}
                         isDarkMode={theme === 'dark'}
                     />
                 );
             default:
-                return (
-                    <TutorHomeScreen
-                        tutorName="Jane"
-                        courses={mockCourses}
-                        tutoringCourses={[
-                            { code: 'SYSC 2006', name: 'Systems Programming', activeCount: 8, tutorCount: 1, studentCount: 42 },
-                            { code: 'COMP 1405', name: 'Intro to Computer Science', activeCount: 15, tutorCount: 1, studentCount: 78 },
-                        ]}
-                        onCoursePress={(courseCode) => {
-                            setSelectedCourse(courseCode);
-                        }}
-                        userStatus={userStatus}
-                        onStatusChange={(status) => setUserStatus(status)}
-                        isDarkMode={theme === 'dark'}
-                    />
-                );
+                return renderTutorHome();
         }
     };
+
+    // Tutor home: real name and the user's own studying/tutoring courses from the catalog.
+    const renderTutorHome = () => (
+        <TutorHomeScreen
+            tutorName={tutorProfile.name}
+            courses={mockCourses.filter((c) => myStudyingCourses.includes(c.code))}
+            tutoringCourses={mockCourses.filter((c) => myTutoringCourses.includes(c.code))}
+            onCoursePress={(courseCode) => {
+                setSelectedCourse(courseCode);
+            }}
+            userStatus={userStatus}
+            onStatusChange={handleStatusChange}
+            isDarkMode={theme === 'dark'}
+        />
+    );
 
     // Helper to render CourseDetailScreen overlay
     const renderCourseDetailOverlay = () => {
@@ -650,8 +565,8 @@ export default function App() {
                         setPostComments(prev => prev.map(c => c.id === commentId ? { ...c, isLiked: !c.isLiked, likes: c.likes + (c.isLiked ? -1 : 1) } : c));
                         boardPosts.toggleCommentLike(commentId, comment.isLiked);
                     }}
-                    onAddComment={async (content) => {
-                        await boardPosts.addComment(post.id, content);
+                    onAddComment={async (content, parentId) => {
+                        await boardPosts.addComment(post.id, content, parentId);
                         const updated = await boardPosts.fetchComments(post.id);
                         setPostComments(updated);
                     }}
@@ -702,12 +617,8 @@ export default function App() {
                             onBlockedUsers={() => setProfileScreen('blocked-users')}
                             onPrivacyPolicy={() => setProfileScreen('privacy-policy')}
                             onTermsOfService={() => setProfileScreen('terms-of-service')}
-                            onThemeChange={(newTheme) => setTheme(newTheme)}
-                            onLogout={async () => {
-                                await auth.signOut();
-                                setIsOnboarding(true);
-                                setOnboardingScreen('welcome');
-                            }}
+                            onThemeChange={handleThemeChange}
+                            onLogout={handleLogout}
                             onNavigate={(screen) => console.log('Navigate to', screen)}
                         />
                     </View>
@@ -717,8 +628,11 @@ export default function App() {
                         <EditProfileScreen
                             {...commonProps}
                             name={studentProfile.name}
-                            pronouns={studentProfile.pronouns || 'He/Him'}
-                            year={studentProfile.year || '2nd Year'}
+                            pronouns={studentProfile.pronouns}
+                            year={studentProfile.year}
+                            degreeLevel={studentProfile.degreeLevel}
+                            gender={studentProfile.gender}
+                            profileVisibility={studentProfile.profileVisibility}
                             program={studentProfile.program}
                             bio={studentProfile.bio}
                             initial={studentProfile.name.charAt(0)}
@@ -778,11 +692,21 @@ export default function App() {
                     <View style={overlayStyle}>
                         <PricingEditorScreen
                             courses={myTutoringCourses}
-                            initialGroupPrice={20}
-                            initialIndividualPrice={40}
-                            initialSessionType={tutorPricingSessionType}
+                            initialGroupPrice={courses.tutorPricing[0]?.groupPrice ?? 20}
+                            initialIndividualPrice={courses.tutorPricing[0]?.individualPrice ?? 40}
+                            initialPerCoursePricing={Object.fromEntries(
+                                courses.tutorPricing.map((p) => [
+                                    p.code,
+                                    {
+                                        group: p.groupPrice ?? 20,
+                                        individual: p.individualPrice ?? 40,
+                                    },
+                                ])
+                            )}
+                            initialSessionType={courses.tutorPricing[0]?.sessionType ?? tutorPricingSessionType}
                             onBack={() => setProfileScreen('main')}
-                            onSave={(data) => {
+                            onSave={async (data) => {
+                                await courses.saveTutoringPricing(data);
                                 setTutorPricingSessionType(data.sessionType);
                                 setProfileScreen('main');
                             }}
@@ -803,12 +727,8 @@ export default function App() {
                             onBlockedUsers={() => setProfileScreen('blocked-users')}
                             onPrivacyPolicy={() => setProfileScreen('privacy-policy')}
                             onTermsOfService={() => setProfileScreen('terms-of-service')}
-                            onThemeChange={(newTheme) => setTheme(newTheme)}
-                            onLogout={async () => {
-                                await auth.signOut();
-                                setIsOnboarding(true);
-                                setOnboardingScreen('welcome');
-                            }}
+                            onThemeChange={handleThemeChange}
+                            onLogout={handleLogout}
                             onNavigate={(screen) => console.log('Navigate to', screen)}
                         />
                     </View>
@@ -953,7 +873,7 @@ export default function App() {
                         userStatus={userStatus}
                         courses={mockCourses}
                         onCoursePress={(code) => setSelectedCourse(code)}
-                        onStatusChange={(status) => setUserStatus(status)}
+                        onStatusChange={handleStatusChange}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -968,6 +888,7 @@ export default function App() {
                         friends={connectedFriends}
                         onBlock={(id) => handleBlockUser(id, mockClassmates.find(c => c.id === id)?.name || 'User')}
                         onDisconnect={(id) => handleDisconnectUser(id, mockClassmates.find(c => c.id === id)?.name || 'User')}
+                        onReport={handleReportUser}
                         onViewProfile={(profile) => {
                             handleViewProfile(profile.id);
                         }}
@@ -1015,6 +936,10 @@ export default function App() {
                             // Navigate based on activity type
                             if (activity.type === 'message') {
                                 setSocialActiveTab('chat');
+                                if (activity.referenceId) {
+                                    setSelectedConversationId(activity.referenceId);
+                                    chat.fetchMessages(activity.referenceId);
+                                }
                             } else if (activity.type === 'board_reply' || activity.type === 'board_like') {
                                 if (activity.courseName) {
                                     setSelectedCourse(activity.courseName);
@@ -1046,12 +971,7 @@ export default function App() {
                         onMyCourses={() => setProfileScreen('my-courses')}
                         onConnections={() => setProfileScreen('connections')}
                         onSettings={() => setProfileScreen('settings')}
-                        onLogout={async () => {
-                            await auth.signOut();
-                            setIsOnboarding(true);
-                            setOnboardingScreen('welcome');
-                            setTheme('light');
-                        }}
+                        onLogout={handleLogout}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -1129,7 +1049,6 @@ export default function App() {
                                 showAlert('Resend Error', error);
                             }
                         }}
-                        onPhoneVerify={() => setOnboardingScreen('phone-input')}
                     />
                 </FadeTransition>
 
@@ -1140,6 +1059,7 @@ export default function App() {
                             setOnboardingProfileBasics(profileData);
                             setOnboardingScreen('profile-prompts');
                         }}
+                        isDarkMode={theme === 'dark'}
                     />
                 </FadeTransition>
 
@@ -1165,31 +1085,6 @@ export default function App() {
                             showAlert('Email Sent', 'Check your email for the password reset link.');
                             setOnboardingScreen('sign-in');
                         }}
-                    />
-                </FadeTransition>
-
-                <FadeTransition isVisible={onboardingScreen === 'phone-input'} zIndex={4}>
-                    <PhoneInputScreen
-                        onBack={() => setOnboardingScreen('code-verification')}
-                        onSendCode={(phone) => {
-                            // Assume simplified flow for now - reuse code struct
-                            setOnboardingScreen('code-verification-phone');
-                            // In a real app we'd save the phone number
-                        }}
-                    />
-                </FadeTransition>
-
-                {/* New: Phone Code Verification */}
-                <FadeTransition isVisible={onboardingScreen === 'code-verification-phone'} zIndex={4}>
-                    <CodeVerificationScreen
-                        target="(613) 555-0123" // Mock phone
-                        method="phone"
-                        onBack={() => setOnboardingScreen('phone-input')}
-                        onVerify={(code) => {
-                            // Code verified, go to profile basics
-                            setOnboardingScreen('profile-basics');
-                        }}
-                        onResendCode={() => console.log('Resending SMS')}
                     />
                 </FadeTransition>
 
@@ -1339,6 +1234,7 @@ export default function App() {
     };
 
     return (
+        <ThemeProvider value={theme}>
         <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaView style={{ flex: 1, backgroundColor: theme === 'dark' ? '#111827' : 'white' }}>
                 <StatusBar style={theme === 'dark' ? 'light' : 'auto'} />
@@ -1346,7 +1242,7 @@ export default function App() {
                     {isOnboarding ? (
                         renderOnboarding()
                     ) : (
-                        <OnboardingToAppTransition show={true}>
+                        <OnboardingToAppTransition show={true} isDarkMode={theme === 'dark'}>
                             <View className="flex-1">
                                 {userRole === 'tutor' ? (
                                     <>
@@ -1360,7 +1256,6 @@ export default function App() {
                                         <TutorNavigationTabs
                                             activeTab={activeTutorTab}
                                             onTabChange={(tab) => {
-                                                setShowNotifications(false);
                                                 setSelectedCourse(null); // Reset course detail view
                                                 // If clicking chat tab, go back to chat list
                                                 if (tab === 'chat') {
@@ -1438,6 +1333,7 @@ export default function App() {
                 />
             </SafeAreaView>
         </GestureHandlerRootView>
+        </ThemeProvider>
     );
 }
 

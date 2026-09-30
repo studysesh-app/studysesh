@@ -1,10 +1,11 @@
-import { StyleSheet, useColorScheme, View, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, TouchableOpacity } from 'react-native';
 import { Check } from 'lucide-react-native';
 import Animated, {
     useAnimatedStyle,
     withTiming,
     Easing,
 } from 'react-native-reanimated';
+import { useIsDark } from '../../lib/theme';
 
 type PronounOption = {
     label: string;
@@ -24,8 +25,7 @@ const ANIMATION_CONFIG = {
 };
 
 export function PronounSelector({ options, selectedValues, onSelect, isDarkMode }: PronounSelectorProps) {
-    const colorScheme = useColorScheme();
-    const isDark = isDarkMode ?? colorScheme === 'dark';
+    const isDark = useIsDark(isDarkMode);
 
     const activeColor = '#db2321';
     const inactiveColor = isDark ? '#9ca3af' : '#6b7280';

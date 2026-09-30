@@ -164,12 +164,14 @@ export function CodeVerificationScreen({ target, method, onBack, onVerify, onRes
                         </TouchableOpacity>
 
                         {/* Alternative method */}
+                        {onPhoneVerify ? (
                         <TouchableOpacity className="mt-6" onPress={onPhoneVerify}>
                             <Text className="text-center text-gray-500 text-sm">
                                 Didn't receive it?{' '}
                                 <Text className="text-red-600 font-semibold">Try phone verification</Text>
                             </Text>
                         </TouchableOpacity>
+                        ) : null}
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>

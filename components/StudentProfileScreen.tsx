@@ -1,6 +1,6 @@
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { User, Settings, BookOpen, LogOut, ChevronRight, Users } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { showConfirm } from '../lib/alert';
 
 interface StudentProfileScreenProps {
     name: string;
@@ -35,15 +35,17 @@ export function StudentProfileScreen({
     ];
 
     const handleLogout = () => {
-        Alert.alert(
-            'Log Out',
-            'Are you sure you want to log out?',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Log Out', style: 'destructive', onPress: onLogout },
-            ]
-        );
+        showConfirm({
+            title: 'Log Out',
+            message: 'Are you sure you want to log out?',
+            confirmText: 'Log Out',
+            destructive: true,
+            onConfirm: onLogout,
+        });
     };
+
+    // In dark mode the menu icons use the same pastel-pink / dark-red pairing as the avatar.
+    const iconColor = isDarkMode ? '#991b1b' : '#db2321';
 
     return (
         <ScrollView className={`flex-1 ${isDarkMode ? 'bg-gray-900' : 'bg-white'}`}>
@@ -70,7 +72,7 @@ export function StudentProfileScreen({
                                 activeOpacity={0.8}
                             >
                                 <View style={[styles.iconContainer, isDarkMode && styles.iconContainerDark]}>
-                                    <Icon size={20} color="#db2321" />
+                                    <Icon size={20} color={iconColor} />
                                 </View>
                                 <Text style={[styles.menuLabel, isDarkMode && styles.textDark]}>{item.label}</Text>
                                 {item.badge && (
@@ -79,7 +81,7 @@ export function StudentProfileScreen({
                                     </View>
                                 )}
                                 <View style={[styles.chevronContainer, isDarkMode && styles.iconContainerDark]}>
-                                    <ChevronRight size={16} color="#db2321" />
+                                    <ChevronRight size={16} color={iconColor} />
                                 </View>
                             </TouchableOpacity>
                         );
@@ -237,7 +239,7 @@ const styles = StyleSheet.create({
         borderColor: '#374151',
     },
     iconContainerDark: {
-        backgroundColor: '#374151',
+        backgroundColor: '#fee2e2', // same pastel pink as the avatar circle
     },
     logoutButtonDark: {
         backgroundColor: '#450a0a',

@@ -10,11 +10,12 @@ import Animated, {
 interface OnboardingToAppTransitionProps {
     children: React.ReactNode;
     show: boolean;
+    isDarkMode?: boolean;
 }
 
 const GL_EASING = Easing.bezier(0.16, 1, 0.3, 1);
 
-export function OnboardingToAppTransition({ children, show }: OnboardingToAppTransitionProps) {
+export function OnboardingToAppTransition({ children, show, isDarkMode = false }: OnboardingToAppTransitionProps) {
     const [isMounted, setIsMounted] = useState(false);
 
     // Shared values for animations
@@ -47,7 +48,7 @@ export function OnboardingToAppTransition({ children, show }: OnboardingToAppTra
     if (!show && !isMounted) return null;
 
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, isDarkMode && styles.containerDark]}>
             {/* Main App Content */}
             <Animated.View style={[styles.content, containerStyle]}>
                 {children}
@@ -59,7 +60,10 @@ export function OnboardingToAppTransition({ children, show }: OnboardingToAppTra
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff', // Ensure background is white during transition
+        backgroundColor: '#fff', // Matches the app background during the transition
+    },
+    containerDark: {
+        backgroundColor: '#111827',
     },
     content: {
         flex: 1,

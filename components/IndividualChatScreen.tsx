@@ -15,7 +15,7 @@ export interface Message {
     message: string;
     timestamp: string;
     isStudent: boolean;
-    status?: 'sent' | 'delivered' | 'read';
+    status?: 'sent' | 'delivered';
 }
 
 interface IndividualChatScreenProps {

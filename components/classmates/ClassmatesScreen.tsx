@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Dimensions, Alert, ToastAndroid, Platform } from 'react-native';
+import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { useState, useRef } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Carousel, { ICarouselInstance } from 'react-native-reanimated-carousel';
@@ -27,49 +27,26 @@ interface ClassmatesScreenProps {
     friends: Set<string>;
     onBlock: (id: string) => void;
     onDisconnect: (id: string) => void;
+    onReport?: (id: string, name: string) => void;
     isDarkMode?: boolean;
 }
 
 export function ClassmatesScreen({
     profiles,
-    currentUserGender,
+    currentUserGender: _currentUserGender,
     onConnect,
     onViewProfile,
     connectedProfiles,
     friends,
     onBlock,
     onDisconnect,
+    onReport,
     isDarkMode = false,
 }: ClassmatesScreenProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
-    // connectedProfiles state is now lifted up
     const carouselRef = useRef<ICarouselInstance>(null);
 
-    const showToast = (message: string) => {
-        if (Platform.OS === 'android') {
-            ToastAndroid.show(message, ToastAndroid.SHORT);
-        } else {
-            Alert.alert('', message, [{ text: 'OK' }], { cancelable: true });
-        }
-    };
-
-    const canViewProfile = (profile: ClassmateProfile) => {
-        // Women and Non-Binary profiles can only be viewed by other Women or Non-Binary users
-        if (profile.gender === 'Woman' || profile.gender === 'Non-Binary') {
-            if (currentUserGender === 'Woman' || currentUserGender === 'Non-Binary') {
-                return true;
-            }
-            return false;
-        }
-        // Men and "Prefer not to say" profiles are visible to everyone
-        return true;
-    };
-
     const handleProfileTap = (profile: ClassmateProfile) => {
-        if (!canViewProfile(profile)) {
-            showToast("You can't view this profile");
-            return;
-        }
         onViewProfile?.(profile);
     };
 
@@ -89,10 +66,10 @@ export function ClassmatesScreen({
 
     if (profiles.length === 0) {
         return (
-            <View style={styles.container}>
+            <View style={[styles.container, isDarkMode ? styles.containerDark : styles.containerLight]}>
                 <View style={styles.emptyState}>
-                    <Text style={styles.emptyTitle}>No classmates yet</Text>
-                    <Text style={styles.emptySubtitle}>
+                    <Text style={[styles.emptyTitle, isDarkMode && styles.emptyTitleDark]}>No classmates yet</Text>
+                    <Text style={[styles.emptySubtitle, isDarkMode && styles.emptySubtitleDark]}>
                         Check back later to discover students in your courses
                     </Text>
                 </View>
@@ -127,6 +104,7 @@ export function ClassmatesScreen({
                             onProfileTap={() => handleProfileTap(profile)}
                             onBlock={() => onBlock(profile.id)}
                             onDisconnect={() => onDisconnect(profile.id)}
+                            onReport={onReport ? () => onReport(profile.id, profile.name) : undefined}
                             isDarkMode={isDarkMode}
                         />
                     </View>
@@ -167,10 +145,16 @@ const styles = StyleSheet.create({
         color: '#374151',
         marginBottom: 8,
     },
+    emptyTitleDark: {
+        color: '#f3f4f6',
+    },
     emptySubtitle: {
         fontSize: 15,
         color: '#6b7280',
         textAlign: 'center',
         lineHeight: 22,
+    },
+    emptySubtitleDark: {
+        color: '#9ca3af',
     },
 });

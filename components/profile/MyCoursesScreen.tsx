@@ -170,10 +170,22 @@ export function MyCoursesScreen({
                     {/* Add Course Button */}
                     <TouchableOpacity
                         onPress={() => setShowAddModal(true)}
-                        className="w-full p-4 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl items-center justify-center flex-row gap-2"
+                        style={{
+                            width: '100%',
+                            padding: 16,
+                            borderWidth: 2,
+                            borderStyle: 'dashed',
+                            borderRadius: 12,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 8,
+                            borderColor: isDarkMode ? '#4b5563' : '#d1d5db',
+                            backgroundColor: isDarkMode ? '#1f2937' : 'transparent',
+                        }}
                     >
-                        <Plus size={20} color="#db2321" />
-                        <Text className="text-red-600 font-semibold">
+                        <Plus size={20} color={isDarkMode ? '#f87171' : '#db2321'} />
+                        <Text style={{ fontWeight: '600', color: isDarkMode ? '#f87171' : '#dc2626' }}>
                             Add Course
                         </Text>
                     </TouchableOpacity>
@@ -188,7 +200,13 @@ export function MyCoursesScreen({
                 </ScrollView>
 
                 {/* Save Button */}
-                <View className="p-4 border-t border-gray-200 dark:border-gray-800">
+                <View
+                    style={{
+                        padding: 16,
+                        borderTopWidth: 1,
+                        borderTopColor: isDarkMode ? '#1f2937' : '#e5e7eb',
+                    }}
+                >
                     <TouchableOpacity
                         onPress={handleSave}
                         className="w-full py-4 bg-red-600 rounded-full shadow-sm"

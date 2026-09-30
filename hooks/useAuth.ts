@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { DEMO_MODE } from '../lib/demo';
 import type { Session, User } from '@supabase/supabase-js';
@@ -52,6 +52,8 @@ interface UpdateProfileData {
   profileVisibility?: 'everyone' | 'women-nb-only';
   photoUrl?: string | null;
   prompts?: Array<{ prompt: string; answer: string }>;
+  theme?: 'light' | 'dark';
+  status?: string;
 }
 
 interface CreateProfileData {
@@ -105,12 +107,10 @@ function makeDemoSession(user: User): Session {
 }
 
 function makeDemoProfile(email: string, overrides: Partial<UserProfile> = {}): UserProfile {
-  const localPart = email.split('@')[0]?.replace(/[^a-zA-Z]/g, '') || 'Demo';
-  const name = localPart.charAt(0).toUpperCase() + localPart.slice(1);
   return {
     id: 'demo-user',
     email,
-    name,
+    name: 'Test User',
     pronouns: ['They', 'Them'],
     gender: 'Prefer not to say',
     year: '2nd Year',
@@ -131,6 +131,7 @@ export function useAuth(): UseAuthReturn {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const signingOutRef = useRef(false);
 
   // Listen for auth state changes
   useEffect(() => {
@@ -142,6 +143,7 @@ export function useAuth(): UseAuthReturn {
 
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (signingOutRef.current) return;
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -153,6 +155,10 @@ export function useAuth(): UseAuthReturn {
     // Listen for changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
+        if (signingOutRef.current) {
+          if (!session) signingOutRef.current = false;
+          return;
+        }
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
@@ -311,15 +317,22 @@ export function useAuth(): UseAuthReturn {
     return { error: null };
   }, []);
 
-  // Sign out
+  // Sign out — clear local session first so the UI always returns to welcome,
+  // even if the network call to Supabase hangs or fails.
   const signOut = useCallback(async () => {
-    if (!DEMO_MODE) {
-      await supabase.auth.signOut();
-    }
+    signingOutRef.current = true;
     demoProfileStore = null;
     setSession(null);
     setUser(null);
     setProfile(null);
+    if (!DEMO_MODE) {
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {
+        console.warn('signOut:', e);
+      }
+    }
+    signingOutRef.current = false;
   }, []);
 
   // Fetch user profile from DB
@@ -487,6 +500,8 @@ export function useAuth(): UseAuthReturn {
           ...(updates.bio !== undefined && { bio: updates.bio }),
           ...(updates.profileVisibility !== undefined && { profile_visibility: updates.profileVisibility }),
           ...(updates.photoUrl !== undefined && { photo_url: updates.photoUrl }),
+          ...(updates.theme !== undefined && { theme: updates.theme }),
+          ...(updates.status !== undefined && { status: updates.status }),
         };
         setProfile(demoProfileStore);
       }
@@ -506,6 +521,8 @@ export function useAuth(): UseAuthReturn {
     if (updates.bio !== undefined) patch.bio = updates.bio;
     if (updates.profileVisibility !== undefined) patch.profile_visibility = updates.profileVisibility;
     if (updates.photoUrl !== undefined) patch.photo_url = updates.photoUrl;
+    if (updates.theme !== undefined) patch.theme = updates.theme;
+    if (updates.status !== undefined) patch.status = updates.status;
 
     if (Object.keys(patch).length > 0) {
       const { error } = await supabase.from('users').update(patch).eq('id', user.id);

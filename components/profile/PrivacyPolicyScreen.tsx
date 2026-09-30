@@ -155,7 +155,7 @@ export function PrivacyPolicyScreen({ onBack, isDarkMode = false }: PrivacyPolic
                                     8. Contact Us
                                 </Text>
                                 <Text className={`text-base ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                                    If you have questions about this Privacy Policy, please contact us at ksmavai2005@gmail.com
+                                    If you have questions about this Privacy Policy, please contact us at studysesh.cu@gmail.com
                                 </Text>
                             </View>
                         </View>

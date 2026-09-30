@@ -1,10 +1,51 @@
-import { View, Text, TouchableOpacity, ScrollView, Switch, Alert, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
 import { ArrowLeft, ChevronRight } from 'lucide-react-native';
 import { useState } from 'react';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
+import { showConfirm } from '../../lib/alert';
+import { openSupportEmail } from '../../lib/support';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+
+function BrandSwitch({
+    value,
+    onValueChange,
+    isDark,
+}: {
+    value: boolean;
+    onValueChange: (next: boolean) => void;
+    isDark: boolean;
+}) {
+    return (
+        <TouchableOpacity
+            onPress={() => onValueChange(!value)}
+            activeOpacity={0.85}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: value }}
+            style={{
+                width: 52,
+                height: 32,
+                borderRadius: 16,
+                padding: 3,
+                justifyContent: 'center',
+                backgroundColor: value ? '#ffffff' : (isDark ? '#374151' : '#e5e7eb'),
+                borderWidth: 2,
+                borderColor: '#db2321',
+            }}
+        >
+            <View
+                style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 11,
+                    backgroundColor: value ? '#db2321' : (isDark ? '#9ca3af' : '#ffffff'),
+                    alignSelf: value ? 'flex-end' : 'flex-start',
+                }}
+            />
+        </TouchableOpacity>
+    );
+}
 
 interface SettingsScreenProps {
     email: string;
@@ -34,6 +75,7 @@ export function SettingsScreen({
     onPrivacyPolicy,
     onTermsOfService,
     onThemeChange,
+    onLogout,
 }: SettingsScreenProps) {
     const [messageNotifs, setMessageNotifs] = useState(true);
 
@@ -157,10 +199,10 @@ export function SettingsScreen({
                                         <Text className={`text-sm ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
                                             Message notifications
                                         </Text>
-                                        <Switch
+                                        <BrandSwitch
                                             value={messageNotifs}
                                             onValueChange={setMessageNotifs}
-                                            trackColor={{ false: '#767577', true: '#db2321' }}
+                                            isDark={theme === 'dark'}
                                         />
                                     </View>
                                 </View>
@@ -206,14 +248,13 @@ export function SettingsScreen({
 
                                 <TouchableOpacity
                                     onPress={() => {
-                                        Alert.alert(
-                                            'Delete Account',
-                                            'Are you sure you want to delete your account? This action cannot be undone.',
-                                            [
-                                                { text: 'Cancel', style: 'cancel' },
-                                                { text: 'Delete', style: 'destructive', onPress: onDeleteAccount }
-                                            ]
-                                        );
+                                        showConfirm({
+                                            title: 'Delete Account',
+                                            message: 'Are you sure you want to delete your account? This action cannot be undone.',
+                                            confirmText: 'Delete',
+                                            destructive: true,
+                                            onConfirm: onDeleteAccount,
+                                        });
                                     }}
                                     className="p-4 flex-row items-center justify-center"
                                 >
@@ -231,7 +272,7 @@ export function SettingsScreen({
                             </Text>
                             <View className={`border rounded-2xl overflow-hidden ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                                 <TouchableOpacity
-                                    onPress={() => alert('Contact Support')}
+                                    onPress={() => openSupportEmail('studysesh support')}
                                     className={`p-4 border-b flex-row items-center justify-between ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}
                                 >
                                     <Text className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
@@ -240,7 +281,7 @@ export function SettingsScreen({
                                     <ChevronRight size={20} color="#9ca3af" />
                                 </TouchableOpacity>
                                 <TouchableOpacity
-                                    onPress={() => alert('Report a Problem')}
+                                    onPress={() => openSupportEmail('studysesh problem report')}
                                     className={`p-4 border-b flex-row items-center justify-between ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}
                                 >
                                     <Text className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
@@ -255,6 +296,21 @@ export function SettingsScreen({
                                 </View>
                             </View>
                         </View>
+
+                        <TouchableOpacity
+                            onPress={() => {
+                                showConfirm({
+                                    title: 'Log Out',
+                                    message: 'Are you sure you want to log out?',
+                                    confirmText: 'Log Out',
+                                    destructive: true,
+                                    onConfirm: onLogout,
+                                });
+                            }}
+                            className={`mb-10 p-4 rounded-2xl items-center border ${theme === 'dark' ? 'bg-red-950/40 border-red-900' : 'bg-red-50 border-red-200'}`}
+                        >
+                            <Text className="text-red-600 text-base font-semibold">Log Out</Text>
+                        </TouchableOpacity>
                     </ScrollView>
                 </Animated.View>
             </GestureDetector>

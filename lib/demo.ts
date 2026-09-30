@@ -7,9 +7,16 @@
  *   - Course search uses the local courses.json instead of the courses table
  * When false, the app talks to the real Supabase project configured in .env.
  */
+import coursesJson from '../courses.json';
+
 export const DEMO_MODE = process.env.EXPO_PUBLIC_DEMO_MODE === 'true';
 
-import coursesJson from '../courses.json';
+/** Name shown in the UI. Uses the profile name when set; "Test User" only in demo. */
+export function displayName(name?: string | null): string {
+    const trimmed = name?.trim();
+    if (trimmed) return trimmed;
+    return DEMO_MODE ? 'Test User' : '';
+}
 
 export interface DemoCourse {
     id: string;

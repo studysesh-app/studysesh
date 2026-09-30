@@ -17,6 +17,7 @@ interface Comment {
     content: string;
     likes: number;
     isLiked: boolean;
+    parentId?: string | null;
 }
 
 interface PostDetailScreenProps {
@@ -33,7 +34,7 @@ interface PostDetailScreenProps {
     onBack: () => void;
     onLikePost: () => void;
     onLikeComment: (commentId: string) => void;
-    onAddComment: (content: string) => void;
+    onAddComment: (content: string, parentId?: string | null) => void;
     onViewProfile?: (tutorId: string) => void;
     isDarkMode?: boolean;
 }
@@ -57,7 +58,7 @@ export function PostDetailScreen({
     isDarkMode = false,
 }: PostDetailScreenProps) {
     const [newComment, setNewComment] = useState('');
-    const [replyingTo, setReplyingTo] = useState<string | null>(null);
+    const [replyingTo, setReplyingTo] = useState<{ id: string; name: string } | null>(null);
     const scrollViewRef = useRef<ScrollView>(null);
     const inputRef = useRef<TextInput>(null);
 
@@ -93,17 +94,21 @@ export function PostDetailScreen({
 
     const handleSubmitComment = () => {
         if (newComment.trim()) {
-            onAddComment(newComment.trim());
+            onAddComment(newComment.trim(), replyingTo?.id ?? null);
             setNewComment('');
             setReplyingTo(null);
         }
     };
 
-    const handleReply = (commentAuthor: string) => {
-        setReplyingTo(commentAuthor);
-        setNewComment(`@${commentAuthor} `);
+    const handleReply = (comment: Comment) => {
+        const rootId = comment.parentId || comment.id;
+        setReplyingTo({ id: rootId, name: comment.authorName });
+        setNewComment('');
         inputRef.current?.focus();
     };
+
+    const topLevelComments = comments.filter((c) => !c.parentId);
+    const repliesFor = (id: string) => comments.filter((c) => c.parentId === id);
 
     return (
         <GestureDetector gesture={swipeGesture}>
@@ -183,55 +188,102 @@ export function PostDetailScreen({
                                 Comments ({comments.length})
                             </Text>
 
-                            {comments.length === 0 ? (
+                            {topLevelComments.length === 0 ? (
                                 <View style={styles.emptyComments}>
                                     <Text style={styles.emptyText}>No comments yet</Text>
                                     <Text style={styles.emptySubtext}>Be the first to comment!</Text>
                                 </View>
                             ) : (
                                 <View style={styles.commentsList}>
-                                    {comments.map((comment) => (
-                                        <View key={comment.id} style={[styles.commentCard, isDarkMode && styles.commentCardDark]}>
-                                            <View style={styles.commentAuthor}>
-                                                <View style={styles.commentAvatar}>
-                                                    <Text style={styles.commentAvatarText}>
-                                                        {comment.authorInitial}
-                                                    </Text>
+                                    {topLevelComments.map((comment) => {
+                                        const replies = repliesFor(comment.id);
+                                        return (
+                                            <View key={comment.id}>
+                                                <View style={[styles.commentCard, isDarkMode && styles.commentCardDark]}>
+                                                    <View style={styles.commentAuthor}>
+                                                        <View style={styles.commentAvatar}>
+                                                            <Text style={styles.commentAvatarText}>
+                                                                {comment.authorInitial}
+                                                            </Text>
+                                                        </View>
+                                                        <View style={styles.commentInfo}>
+                                                            <Text style={[styles.commentName, isDarkMode && styles.textDark]}>{comment.authorName}</Text>
+                                                            <Text style={styles.commentMeta}>
+                                                                {comment.authorYear} • {comment.timestamp}
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+                                                    <Text style={[styles.commentContent, isDarkMode && styles.textGray200]}>{comment.content}</Text>
+                                                    <View style={styles.commentActions}>
+                                                        <TouchableOpacity
+                                                            style={styles.commentAction}
+                                                            onPress={() => handleReply(comment)}
+                                                        >
+                                                            <Text style={styles.replyButtonText}>Reply</Text>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity
+                                                            style={styles.commentAction}
+                                                            onPress={() => onLikeComment(comment.id)}
+                                                        >
+                                                            <Heart
+                                                                size={16}
+                                                                color={comment.isLiked ? '#db2321' : '#9ca3af'}
+                                                                fill={comment.isLiked ? '#db2321' : 'transparent'}
+                                                            />
+                                                            <Text style={[
+                                                                styles.commentLikeText,
+                                                                comment.isLiked && styles.commentLikeTextActive
+                                                            ]}>
+                                                                {comment.likes}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    </View>
                                                 </View>
-                                                <View style={styles.commentInfo}>
-                                                    <Text style={[styles.commentName, isDarkMode && styles.textDark]}>{comment.authorName}</Text>
-                                                    <Text style={styles.commentMeta}>
-                                                        {comment.authorYear} • {comment.timestamp}
-                                                    </Text>
-                                                </View>
+                                                {replies.map((reply) => (
+                                                    <View key={reply.id} style={[styles.replyCard, isDarkMode && styles.commentCardDark]}>
+                                                        <View style={styles.commentAuthor}>
+                                                            <View style={styles.commentAvatar}>
+                                                                <Text style={styles.commentAvatarText}>
+                                                                    {reply.authorInitial}
+                                                                </Text>
+                                                            </View>
+                                                            <View style={styles.commentInfo}>
+                                                                <Text style={[styles.commentName, isDarkMode && styles.textDark]}>{reply.authorName}</Text>
+                                                                <Text style={styles.commentMeta}>
+                                                                    {reply.authorYear} • {reply.timestamp}
+                                                                </Text>
+                                                            </View>
+                                                        </View>
+                                                        <Text style={[styles.commentContent, isDarkMode && styles.textGray200]}>{reply.content}</Text>
+                                                        <View style={styles.commentActions}>
+                                                            <TouchableOpacity
+                                                                style={styles.commentAction}
+                                                                onPress={() => handleReply(reply)}
+                                                            >
+                                                                <Text style={styles.replyButtonText}>Reply</Text>
+                                                            </TouchableOpacity>
+                                                            <TouchableOpacity
+                                                                style={styles.commentAction}
+                                                                onPress={() => onLikeComment(reply.id)}
+                                                            >
+                                                                <Heart
+                                                                    size={16}
+                                                                    color={reply.isLiked ? '#db2321' : '#9ca3af'}
+                                                                    fill={reply.isLiked ? '#db2321' : 'transparent'}
+                                                                />
+                                                                <Text style={[
+                                                                    styles.commentLikeText,
+                                                                    reply.isLiked && styles.commentLikeTextActive
+                                                                ]}>
+                                                                    {reply.likes}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    </View>
+                                                ))}
                                             </View>
-                                            <Text style={[styles.commentContent, isDarkMode && styles.textGray200]}>{comment.content}</Text>
-                                            <View style={styles.commentActions}>
-                                                <TouchableOpacity
-                                                    style={styles.commentAction}
-                                                    onPress={() => handleReply(comment.authorName)}
-                                                >
-                                                    <Text style={styles.replyButtonText}>Reply</Text>
-                                                </TouchableOpacity>
-                                                <TouchableOpacity
-                                                    style={styles.commentAction}
-                                                    onPress={() => onLikeComment(comment.id)}
-                                                >
-                                                    <Heart
-                                                        size={16}
-                                                        color={comment.isLiked ? '#db2321' : '#9ca3af'}
-                                                        fill={comment.isLiked ? '#db2321' : 'transparent'}
-                                                    />
-                                                    <Text style={[
-                                                        styles.commentLikeText,
-                                                        comment.isLiked && styles.commentLikeTextActive
-                                                    ]}>
-                                                        {comment.likes}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        </View>
-                                    ))}
+                                        );
+                                    })}
                                 </View>
                             )}
                         </View>
@@ -239,6 +291,17 @@ export function PostDetailScreen({
 
                     {/* Comment Input - Fixed at bottom */}
                     <View style={[styles.commentInputContainer, isDarkMode && styles.commentInputContainerDark]}>
+                        {replyingTo ? (
+                            <View style={styles.replyingBanner}>
+                                <Text style={styles.replyingText} numberOfLines={1}>
+                                    Replying to {replyingTo.name}
+                                </Text>
+                                <TouchableOpacity onPress={() => setReplyingTo(null)}>
+                                    <Text style={styles.replyingCancel}>Cancel</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : null}
+                        <View style={styles.commentInputRow}>
                         <View style={[styles.inputWrapper, isDarkMode && styles.inputWrapperDark]}>
                             <ScrollView
                                 style={styles.inputScrollView}
@@ -250,7 +313,7 @@ export function PostDetailScreen({
                                 <TextInput
                                     ref={inputRef}
                                     style={[styles.commentInput, isDarkMode && styles.textDark]}
-                                    placeholder="Write a comment..."
+                                    placeholder={replyingTo ? `Reply to ${replyingTo.name}...` : 'Write a comment...'}
                                     placeholderTextColor={isDarkMode ? '#6b7280' : '#9ca3af'}
                                     value={newComment}
                                     onChangeText={setNewComment}
@@ -270,6 +333,7 @@ export function PostDetailScreen({
                         >
                             <Send size={20} color="#fff" />
                         </TouchableOpacity>
+                        </View>
                     </View>
                 </KeyboardAvoidingView>
             </Animated.View>
@@ -491,14 +555,42 @@ const styles = StyleSheet.create({
     },
     // Comment Input
     commentInputContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
         paddingHorizontal: 12,
         paddingVertical: 10,
         backgroundColor: '#fff',
         borderTopWidth: 1,
         borderTopColor: '#f3f4f6',
+    },
+    commentInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
         gap: 10,
+    },
+    replyCard: {
+        backgroundColor: '#f9fafb',
+        borderRadius: 12,
+        padding: 14,
+        marginLeft: 28,
+        marginTop: 8,
+    },
+    replyingBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+        paddingHorizontal: 4,
+    },
+    replyingText: {
+        flex: 1,
+        fontSize: 13,
+        color: '#6b7280',
+        fontWeight: '500',
+    },
+    replyingCancel: {
+        fontSize: 13,
+        color: '#db2321',
+        fontWeight: '600',
+        marginLeft: 12,
     },
     inputWrapper: {
         flex: 1,

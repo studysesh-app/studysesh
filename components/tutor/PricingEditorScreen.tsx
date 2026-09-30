@@ -56,16 +56,13 @@ export function PricingEditorScreen({
         { id: 'both', title: 'Both', content: <></> },
     ], []);
 
-    // Middle default value for sliders (between 5 and 100, middle is ~50)
-    const SLIDER_MIDDLE_DEFAULT = 50;
-
-    // Store SEPARATE prices for each session type - each starts at middle default
+    // Store SEPARATE prices for each session type
     const [sessionTypePricing, setSessionTypePricing] = useState<
         Record<'online' | 'in-person' | 'both', { group: number; individual: number }>
     >({
-        'online': { group: SLIDER_MIDDLE_DEFAULT, individual: SLIDER_MIDDLE_DEFAULT },
-        'in-person': { group: SLIDER_MIDDLE_DEFAULT, individual: SLIDER_MIDDLE_DEFAULT },
-        'both': { group: SLIDER_MIDDLE_DEFAULT, individual: SLIDER_MIDDLE_DEFAULT },
+        'online': { group: initialGroupPrice, individual: initialIndividualPrice },
+        'in-person': { group: initialGroupPrice, individual: initialIndividualPrice },
+        'both': { group: initialGroupPrice, individual: initialIndividualPrice },
     });
 
     // Get prices for CURRENT session type

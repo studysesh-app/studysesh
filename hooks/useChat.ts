@@ -20,7 +20,7 @@ export interface ChatMessageItem {
     timestamp: string;
     /** True when the current viewer sent this message (see MessageBubble's isMyMessage logic). */
     isStudent: boolean;
-    status: 'sent' | 'delivered' | 'read';
+    status: 'sent' | 'delivered';
     senderId: string;
 }
 
@@ -47,7 +47,7 @@ export function useChat(userId: string | null) {
             return;
         }
 
-        const [{ data: otherParticipants }, { data: lastMessages }] = await Promise.all([
+        const [{ data: otherParticipants }, { data: lastMessages }, { data: myParticipantMeta }] = await Promise.all([
             supabase
                 .from('conversation_participants')
                 .select('conversation_id, user_id, users(name)')
@@ -58,17 +58,27 @@ export function useChat(userId: string | null) {
                 .select('id, conversation_id, sender_id, content, status, created_at')
                 .in('conversation_id', convIds)
                 .order('created_at', { ascending: false }),
+            supabase
+                .from('conversation_participants')
+                .select('conversation_id, last_read_at')
+                .in('conversation_id', convIds)
+                .eq('user_id', userId),
         ]);
 
         const otherByConv = new Map(
             (otherParticipants ?? []).map((r: any) => [r.conversation_id, { id: r.user_id, name: r.users?.name ?? 'Unknown' }])
         );
 
+        const lastReadByConv = new Map(
+            (myParticipantMeta ?? []).map((r: any) => [r.conversation_id as string, r.last_read_at as string | null])
+        );
+
         const lastByConv = new Map<string, any>();
         const unreadByConv = new Map<string, number>();
         for (const m of lastMessages ?? []) {
             if (!lastByConv.has(m.conversation_id)) lastByConv.set(m.conversation_id, m);
-            if (m.sender_id !== userId && m.status !== 'read') {
+            const lastRead = lastReadByConv.get(m.conversation_id);
+            if (m.sender_id !== userId && (!lastRead || m.created_at > lastRead)) {
                 unreadByConv.set(m.conversation_id, (unreadByConv.get(m.conversation_id) ?? 0) + 1);
             }
         }
@@ -121,10 +131,15 @@ export function useChat(userId: string | null) {
 
             await supabase
                 .from('messages')
-                .update({ status: 'read' })
+                .update({ status: 'delivered' })
                 .eq('conversation_id', conversationId)
                 .neq('sender_id', userId)
-                .neq('status', 'read');
+                .eq('status', 'sent');
+            await supabase
+                .from('conversation_participants')
+                .update({ last_read_at: new Date().toISOString() })
+                .eq('conversation_id', conversationId)
+                .eq('user_id', userId);
         },
         [userId]
     );
@@ -135,6 +150,9 @@ export function useChat(userId: string | null) {
             .channel(`messages-${userId}`)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
                 const m: any = payload.new;
+                if (m.sender_id !== userId && m.status === 'sent') {
+                    supabase.from('messages').update({ status: 'delivered' }).eq('id', m.id).then(() => {});
+                }
                 setMessagesByConversation((prev) => {
                     if (!prev[m.conversation_id]) return prev;
                     return {
@@ -146,13 +164,25 @@ export function useChat(userId: string | null) {
                                 message: m.content,
                                 timestamp: timeAgo(m.created_at),
                                 isStudent: m.sender_id === userId,
-                                status: m.status,
+                                status: m.sender_id === userId ? 'sent' : 'delivered',
                                 senderId: m.sender_id,
                             },
                         ],
                     };
                 });
                 refreshConversations();
+            })
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
+                const m: any = payload.new;
+                setMessagesByConversation((prev) => {
+                    if (!prev[m.conversation_id]) return prev;
+                    return {
+                        ...prev,
+                        [m.conversation_id]: prev[m.conversation_id].map((msg) =>
+                            msg.id === m.id ? { ...msg, status: m.status } : msg
+                        ),
+                    };
+                });
             })
             .subscribe();
         return () => {
@@ -170,10 +200,29 @@ export function useChat(userId: string | null) {
                 console.error('Send message error:', error);
                 return;
             }
+            const other = conversations.find((c) => c.id === conversationId);
+            if (other?.otherUserId) {
+                const { data: existing } = await supabase
+                    .from('activities')
+                    .select('id')
+                    .eq('user_id', other.otherUserId)
+                    .eq('type', 'message')
+                    .eq('reference_id', conversationId)
+                    .eq('is_read', false)
+                    .maybeSingle();
+                if (!existing) {
+                    await supabase.from('activities').insert({
+                        user_id: other.otherUserId,
+                        actor_id: userId,
+                        type: 'message',
+                        reference_id: conversationId,
+                    });
+                }
+            }
             await fetchMessages(conversationId);
             await refreshConversations();
         },
-        [userId, fetchMessages, refreshConversations]
+        [userId, fetchMessages, refreshConversations, conversations]
     );
 
     const getOrCreateConversation = useCallback(
@@ -204,9 +253,19 @@ export function useChat(userId: string | null) {
         [userId]
     );
 
-    const markConversationRead = useCallback((conversationId: string) => {
-        setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, unreadCount: 0 } : c)));
-    }, []);
+    const markConversationRead = useCallback(
+        (conversationId: string) => {
+            setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, unreadCount: 0 } : c)));
+            if (DEMO_MODE || !userId) return;
+            supabase
+                .from('conversation_participants')
+                .update({ last_read_at: new Date().toISOString() })
+                .eq('conversation_id', conversationId)
+                .eq('user_id', userId)
+                .then(() => {});
+        },
+        [userId]
+    );
 
     return {
         conversations,

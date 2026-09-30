@@ -97,6 +97,7 @@ export function TimeSlotModal({ visible, onClose, onSave, isDark }: TimeSlotModa
                                 onValueChange={setRepeat}
                                 placeholder="Select frequency"
                                 direction="up"
+                                isDarkMode={isDark}
                             />
                         </View>
 

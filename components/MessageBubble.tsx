@@ -5,7 +5,7 @@ interface MessageBubbleProps {
     message: string;
     timestamp: string;
     isStudent: boolean;
-    status?: 'sent' | 'delivered' | 'read';
+    status?: 'sent' | 'delivered';
     isTutorView?: boolean;
     isDarkMode?: boolean;
 }
@@ -48,7 +48,7 @@ export function MessageBubble({
                 */}
                 {status && isMyMessage && (
                     <Text className="text-[10px] text-gray-400 font-medium px-1">
-                        {status === 'read' ? 'Read' : 'Delivered'}
+                        {status === 'delivered' ? 'Delivered' : 'Sent'}
                     </Text>
                 )}
             </View>

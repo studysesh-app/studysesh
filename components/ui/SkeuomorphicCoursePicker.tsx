@@ -1,7 +1,7 @@
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, useColorScheme, Animated, Easing, Modal, Pressable, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Animated, Easing, Modal, Pressable, Dimensions } from 'react-native';
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useIsDark } from '../../lib/theme';
 
 interface SkeuomorphicCoursePickerProps {
     courses: string[];
@@ -26,8 +26,7 @@ export function SkeuomorphicCoursePicker({
 }: SkeuomorphicCoursePickerProps) {
     const scrollViewRef = useRef<ScrollView>(null);
     const [isOpen, setIsOpen] = useState(false);
-    const colorScheme = useColorScheme();
-    const isDark = isDarkMode ?? colorScheme === 'dark';
+    const isDark = useIsDark(isDarkMode);
 
     // Animation values
     const chevronRotation = useRef(new Animated.Value(0)).current;
@@ -134,28 +133,18 @@ export function SkeuomorphicCoursePicker({
                 style={[styles.trigger, isOpen && styles.triggerActive]}
                 activeOpacity={0.9}
             >
-                <LinearGradient
-                    colors={isOpen
-                        ? (isDark ? ['#2a1a1a', '#1a0f0f'] : ['#fff5f5', '#fee2e2'])
-                        : (isDark ? ['#2a2a2a', '#1f1f1f'] : ['#ffffff', '#f9fafb'])
-                    }
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                    style={styles.triggerGradient}
+                <Text
+                    style={[
+                        styles.triggerText,
+                        !selectedValue && styles.triggerTextPlaceholder,
+                    ]}
+                    numberOfLines={1}
                 >
-                    <Text
-                        style={[
-                            styles.triggerText,
-                            !selectedValue && styles.triggerTextPlaceholder,
-                        ]}
-                        numberOfLines={1}
-                    >
-                        {selectedValue ? (getItemLabel ? getItemLabel(selectedValue) : selectedValue) : placeholder}
-                    </Text>
-                    <Animated.View style={{ transform: [{ rotate: chevronRotate }] }}>
-                        <ChevronDown size={20} color={isDark ? '#9ca3af' : '#6b7280'} />
-                    </Animated.View>
-                </LinearGradient>
+                    {selectedValue ? (getItemLabel ? getItemLabel(selectedValue) : selectedValue) : placeholder}
+                </Text>
+                <Animated.View style={{ transform: [{ rotate: chevronRotate }] }}>
+                    <ChevronDown size={20} color={isDark ? '#9ca3af' : '#6b7280'} />
+                </Animated.View>
             </TouchableOpacity>
 
             {/* Bottom Sheet Modal */}
@@ -229,30 +218,19 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
     },
     trigger: {
         height: 56,
-        borderRadius: 16,
+        borderRadius: 36,
         overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: isDark ? 0.4 : 0.15,
-        shadowRadius: 8,
-        elevation: 8,
-        borderWidth: 1,
-        borderColor: isDark ? '#374151' : '#e5e7eb',
-    },
-    triggerActive: {
-        shadowColor: '#db2321',
-        shadowOpacity: 0.3,
-        shadowRadius: 12,
-        elevation: 12,
-        borderColor: '#db2321',
-    },
-    triggerGradient: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        height: '100%',
-        paddingHorizontal: 16,
-        borderRadius: 16,
+        paddingHorizontal: 20,
+        backgroundColor: isDark ? '#1f2937' : '#ffffff',
+        borderWidth: 1.5,
+        borderColor: isDark ? '#374151' : '#e5e7eb',
+    },
+    triggerActive: {
+        borderColor: isDark ? 'rgba(219, 35, 33, 0.45)' : '#fecaca',
+        backgroundColor: isDark ? 'rgba(219, 35, 33, 0.2)' : 'rgba(219, 35, 33, 0.1)',
     },
     triggerText: {
         flex: 1,

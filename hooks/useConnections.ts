@@ -219,6 +219,18 @@ export function useConnections(userId: string | null) {
         [userId]
     );
 
+    const report = useCallback(
+        async (otherUserId: string, reason?: string) => {
+            if (DEMO_MODE || !userId) return;
+            await supabase.from('reports').insert({
+                reporter_id: userId,
+                reported_id: otherUserId,
+                reason: reason ?? null,
+            });
+        },
+        [userId]
+    );
+
     return {
         friends,
         friendProfiles,
@@ -234,5 +246,6 @@ export function useConnections(userId: string | null) {
         disconnect,
         block,
         unblock,
+        report,
     };
 }

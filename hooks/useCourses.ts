@@ -11,9 +11,17 @@ export interface CourseSummary {
     studentCount: number;
 }
 
+export interface TutorCoursePricing {
+    code: string;
+    groupPrice: number | null;
+    individualPrice: number | null;
+    sessionType: 'online' | 'in-person' | 'both';
+}
+
 export function useCourses(userId: string | null) {
     const [studyingCourses, setStudyingCourses] = useState<string[]>([]);
     const [tutoringCourses, setTutoringCourses] = useState<string[]>([]);
+    const [tutorPricing, setTutorPricing] = useState<TutorCoursePricing[]>([]);
     const [catalog, setCatalog] = useState<CourseSummary[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -26,13 +34,23 @@ export function useCourses(userId: string | null) {
 
         const [{ data: myCourseRows }, { data: myTutorRows }] = await Promise.all([
             supabase.from('user_courses').select('courses(code)').eq('user_id', userId),
-            supabase.from('tutor_courses').select('courses(code)').eq('user_id', userId),
+            supabase.from('tutor_courses').select('group_price, individual_price, session_type, courses(code)').eq('user_id', userId),
         ]);
 
         const studying = (myCourseRows ?? []).map((r: any) => r.courses?.code).filter(Boolean);
         const tutoring = (myTutorRows ?? []).map((r: any) => r.courses?.code).filter(Boolean);
         setStudyingCourses(studying);
         setTutoringCourses(tutoring);
+        setTutorPricing(
+            (myTutorRows ?? [])
+                .filter((r: any) => r.courses?.code)
+                .map((r: any) => ({
+                    code: r.courses.code as string,
+                    groupPrice: r.group_price != null ? Number(r.group_price) : null,
+                    individualPrice: r.individual_price != null ? Number(r.individual_price) : null,
+                    sessionType: (r.session_type as TutorCoursePricing['sessionType']) || 'both',
+                }))
+        );
 
         const codes = [...new Set([...studying, ...tutoring])];
         if (codes.length > 0) {
@@ -156,6 +174,53 @@ export function useCourses(userId: string | null) {
         [tutoringCourses, addTutoringCourse, removeTutoringCourse, userId]
     );
 
+    const saveTutoringPricing = useCallback(
+        async (data: {
+            applyToAll: boolean;
+            globalGroupPrice: number;
+            globalIndividualPrice: number;
+            perCoursePricing: Record<string, { group: number; individual: number }>;
+            sessionType: 'online' | 'in-person' | 'both';
+        }) => {
+            if (DEMO_MODE || !userId) {
+                setTutorPricing((prev) =>
+                    prev.map((p) => ({
+                        ...p,
+                        sessionType: data.sessionType,
+                        groupPrice: data.applyToAll ? data.globalGroupPrice : (data.perCoursePricing[p.code]?.group ?? p.groupPrice),
+                        individualPrice: data.applyToAll
+                            ? data.globalIndividualPrice
+                            : (data.perCoursePricing[p.code]?.individual ?? p.individualPrice),
+                    }))
+                );
+                return;
+            }
+            const { data: rows } = await supabase
+                .from('tutor_courses')
+                .select('course_id, courses(code)')
+                .eq('user_id', userId);
+            for (const row of rows ?? []) {
+                const code = (row as any).courses?.code as string | undefined;
+                if (!code) continue;
+                const group = data.applyToAll ? data.globalGroupPrice : (data.perCoursePricing[code]?.group ?? data.globalGroupPrice);
+                const individual = data.applyToAll
+                    ? data.globalIndividualPrice
+                    : (data.perCoursePricing[code]?.individual ?? data.globalIndividualPrice);
+                await supabase
+                    .from('tutor_courses')
+                    .update({
+                        group_price: group,
+                        individual_price: individual,
+                        session_type: data.sessionType,
+                    })
+                    .eq('user_id', userId)
+                    .eq('course_id', (row as any).course_id);
+            }
+            await refresh();
+        },
+        [userId, refresh]
+    );
+
     return {
         studyingCourses,
         tutoringCourses,
@@ -167,6 +232,8 @@ export function useCourses(userId: string | null) {
         addTutoringCourse,
         removeTutoringCourse,
         setAllTutoringCourses,
+        tutorPricing,
+        saveTutoringPricing,
         refresh,
     };
 }
