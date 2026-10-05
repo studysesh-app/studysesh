@@ -1,10 +1,12 @@
-import { View, Text, TouchableOpacity, ScrollView, Image, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, ActivityIndicator } from 'react-native';
 import { ArrowLeft, Upload, FileText, X, Check } from 'lucide-react-native';
 import { useState } from 'react';
+import { showAlert } from '../../lib/alert';
 import * as DocumentPicker from 'expo-document-picker';
 import { SkeuomorphicCoursePicker } from '../ui/SkeuomorphicCoursePicker';
 import { supabase } from '../../lib/supabase';
 import { uploadTutorProof } from '../../lib/storage';
+import { DEMO_MODE } from '../../lib/demo';
 
 interface TutorProofUploadScreenProps {
     courses: string[];
@@ -35,7 +37,7 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
         const isPdf = asset.mimeType === 'application/pdf';
         const isImage = asset.mimeType?.startsWith('image/');
         if (!isPdf && !isImage) {
-            Alert.alert('Unsupported File', 'Please select a PDF or an image file.');
+            showAlert('Unsupported File', 'Please select a PDF or an image file.');
             return;
         }
 
@@ -56,7 +58,7 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
             ]);
         } catch (e) {
             console.error('Proof upload error:', e);
-            Alert.alert('Upload Failed', 'Could not upload the file. Please try again.');
+            showAlert('Upload Failed', 'Could not upload the file. Please try again.');
         } finally {
             setUploading(false);
         }
@@ -71,6 +73,7 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
     };
 
     const handleContinue = () => {
+        if (!DEMO_MODE && !allCoursesHaveProof) return;
         const proofs: Record<string, string> = {};
         uploadedFiles.forEach((f) => {
             proofs[f.course] = f.path;
@@ -229,7 +232,8 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
             <View className="p-4 border-t border-gray-200 dark:border-gray-800">
                 <TouchableOpacity
                     onPress={handleContinue}
-                    className="w-full py-4 bg-red-600 rounded-full shadow-sm"
+                    disabled={!DEMO_MODE && !allCoursesHaveProof}
+                    className={`w-full py-4 rounded-full shadow-sm ${DEMO_MODE || allCoursesHaveProof ? 'bg-red-600' : 'bg-gray-300'}`}
                 >
                     <Text className="text-center text-white text-base font-semibold">
                         Continue

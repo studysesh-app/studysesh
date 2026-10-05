@@ -146,8 +146,8 @@ export function ActivityScreen({
                                             // For now we might just pass the name or ID. 
                                             // Let's assume we can try to look up by name if needed, but ID is better.
                                             // The text said "clicking a student's name or pfp icon".
-                                            if (onViewProfile && activity.userName) {
-                                                onViewProfile(activity.userName);
+                                            if (onViewProfile && activity.userId) {
+                                                onViewProfile(activity.userId);
                                             }
                                         }}
                                     >

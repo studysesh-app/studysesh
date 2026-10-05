@@ -50,7 +50,7 @@ export function useChat(userId: string | null) {
         const [{ data: otherParticipants }, { data: lastMessages }, { data: myParticipantMeta }] = await Promise.all([
             supabase
                 .from('conversation_participants')
-                .select('conversation_id, user_id, users(name)')
+                .select('conversation_id, user_id, users(name, is_tutor)')
                 .in('conversation_id', convIds)
                 .neq('user_id', userId),
             supabase
@@ -66,7 +66,10 @@ export function useChat(userId: string | null) {
         ]);
 
         const otherByConv = new Map(
-            (otherParticipants ?? []).map((r: any) => [r.conversation_id, { id: r.user_id, name: r.users?.name ?? 'Unknown' }])
+            (otherParticipants ?? []).map((r: any) => [
+                r.conversation_id,
+                { id: r.user_id, name: r.users?.name ?? 'Unknown', isTutor: !!r.users?.is_tutor },
+            ])
         );
 
         const lastReadByConv = new Map(
@@ -95,7 +98,7 @@ export function useChat(userId: string | null) {
                     lastMessage: last ? (last.sender_id === userId ? `You: ${last.content}` : last.content) : 'Start a conversation',
                     timestamp: last ? timeAgo(last.created_at) : '',
                     unreadCount: unreadByConv.get(id) ?? 0,
-                    type: 'student' as const,
+                    type: other?.isTutor ? 'tutor' : 'student',
                     _sortKey: last?.created_at ?? '',
                 };
             })
@@ -192,13 +195,14 @@ export function useChat(userId: string | null) {
 
     const sendMessage = useCallback(
         async (conversationId: string, content: string) => {
-            if (DEMO_MODE || !userId) return;
+            if (DEMO_MODE) return true;
+            if (!userId) return false;
             const { error } = await supabase
                 .from('messages')
                 .insert({ conversation_id: conversationId, sender_id: userId, content, status: 'sent' });
             if (error) {
                 console.error('Send message error:', error);
-                return;
+                return false;
             }
             const other = conversations.find((c) => c.id === conversationId);
             if (other?.otherUserId) {
@@ -221,6 +225,7 @@ export function useChat(userId: string | null) {
             }
             await fetchMessages(conversationId);
             await refreshConversations();
+            return true;
         },
         [userId, fetchMessages, refreshConversations, conversations]
     );

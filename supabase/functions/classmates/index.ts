@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
       await Promise.all([
         admin.from("users").select("gender").eq("id", user.id).single(),
         admin.from("blocked_users").select("blocker_id, blocked_id").or(`blocker_id.eq.${user.id},blocked_id.eq.${user.id}`),
-        admin.from("connections").select("requester_id, receiver_id").or(`requester_id.eq.${user.id},receiver_id.eq.${user.id}`),
+        admin.from("connections").select("requester_id, receiver_id, status").or(`requester_id.eq.${user.id},receiver_id.eq.${user.id}`),
         admin.from("user_courses").select("user_id, course_id").in("course_id", courseIds),
         admin.from("courses").select("id, code").in("id", courseIds),
       ]);
@@ -64,7 +64,9 @@ Deno.serve(async (req) => {
       (blockedRows ?? []).map((b) => (b.blocker_id === user.id ? b.blocked_id : b.blocker_id)),
     );
     const connectedIds = new Set(
-      (connectionRows ?? []).map((c) => (c.requester_id === user.id ? c.receiver_id : c.requester_id)),
+      (connectionRows ?? [])
+        .filter((c) => c.status === "accepted")
+        .map((c) => (c.requester_id === user.id ? c.receiver_id : c.requester_id)),
     );
     const courseCodeById = new Map((courseRows ?? []).map((c) => [c.id, c.code]));
 

@@ -39,7 +39,7 @@ export function ProfileCard({
     sharedCourses = [],
     isConnected = false,
     isFriend = false,
-    prompts,
+    prompts = [],
     onConnect,
     onProfileTap,
     onBlock,

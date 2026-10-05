@@ -9,7 +9,10 @@ import { useMemo } from 'react';
 interface TutorPricingSetupScreenProps {
     courses: string[];
     onBack: () => void;
-    onContinue: (pricing: Record<string, { group: number; individual: number }>) => void;
+    onContinue: (
+        pricing: Record<string, { group: number; individual: number }>,
+        sessionType: 'online' | 'in-person' | 'both',
+    ) => void;
     isDarkMode?: boolean;
 }
 
@@ -23,9 +26,9 @@ export function TutorPricingSetupScreen({ courses, onBack, onContinue, isDarkMod
     const [sessionTypePricing, setSessionTypePricing] = useState<
         Record<'online' | 'in-person' | 'both', { group: number; individual: number }>
     >({
-        'online': { group: 15, individual: 28 },
-        'in-person': { group: 15, individual: 28 },
-        'both': { group: 15, individual: 28 },
+        'online': { group: 6, individual: 20 },
+        'in-person': { group: 6, individual: 20 },
+        'both': { group: 6, individual: 20 },
     });
 
     // Get prices for CURRENT session type
@@ -48,7 +51,7 @@ export function TutorPricingSetupScreen({ courses, onBack, onContinue, isDarkMod
         courses.forEach((course) => {
             pricing[course] = { group: currentPricing.group, individual: currentPricing.individual };
         });
-        onContinue(pricing);
+        onContinue(pricing, sessionType);
     };
 
     const adjustPrice = (type: 'group' | 'individual', val: number) => {

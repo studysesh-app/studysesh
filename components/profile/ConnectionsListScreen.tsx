@@ -1,5 +1,6 @@
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Image, Alert, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Image, Dimensions } from 'react-native';
 import { ArrowLeft, MessageSquare, UserMinus } from 'lucide-react-native';
+import { showConfirm } from '../../lib/alert';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 
@@ -61,18 +62,13 @@ export function ConnectionsListScreen({
     }));
 
     const handleDisconnect = (connection: Connection) => {
-        Alert.alert(
-            'Disconnect',
-            `Are you sure you want to disconnect from ${connection.name}?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Disconnect',
-                    style: 'destructive',
-                    onPress: () => onDisconnect(connection.id, connection.name)
-                }
-            ]
-        );
+        showConfirm({
+            title: 'Disconnect',
+            message: `Are you sure you want to disconnect from ${connection.name}?`,
+            confirmText: 'Disconnect',
+            destructive: true,
+            onConfirm: () => onDisconnect(connection.id, connection.name),
+        });
     };
 
     return (

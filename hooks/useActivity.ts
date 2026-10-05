@@ -87,8 +87,9 @@ export function useActivity(userId: string | null) {
         }
     }, [userId]);
 
-    const removeActivity = useCallback((id: string) => {
+    const removeActivity = useCallback(async (id: string) => {
         setActivities((prev) => prev.filter((a) => a.id !== id));
+        if (!DEMO_MODE) await supabase.from('activities').delete().eq('id', id);
     }, []);
 
     return { activities, loading, refresh, markRead, markAllRead, removeActivity };

@@ -41,7 +41,7 @@ interface CourseDetailScreenProps {
     activeCount: number;
     studentCount: number;
     onBack: () => void;
-    onCreatePost: (content: string, type: PostType) => void;
+    onCreatePost: (content: string, type: PostType) => void | Promise<boolean | void>;
     onLikePost: (postId: string) => void;
     onCommentPost: (postId: string) => void;
     onMessageTutor: (tutorId: string) => void;
@@ -140,12 +140,12 @@ export function CourseDetailScreen({
         transform: [{ translateX: translateX.value }],
     }));
 
-    const handleSubmitPost = () => {
-        if (newPostContent.trim()) {
-            onCreatePost(newPostContent.trim(), isQuestion ? 'question' : 'post');
-            setNewPostContent('');
-            setIsQuestion(false);
-        }
+    const handleSubmitPost = async () => {
+        if (!newPostContent.trim()) return;
+        const posted = await onCreatePost(newPostContent.trim(), isQuestion ? 'question' : 'post');
+        if (posted === false) return;
+        setNewPostContent('');
+        setIsQuestion(false);
     };
 
     const handlePostPress = (post: BoardPost) => {

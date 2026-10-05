@@ -23,7 +23,7 @@ interface IndividualChatScreenProps {
     tutorInitial: string;
     messages: Message[];
     onBack: () => void;
-    onSendMessage: (message: string) => void;
+    onSendMessage: (message: string) => void | Promise<boolean | void>;
     onViewProfile?: () => void;
     isTutorView?: boolean;
     type?: 'tutor' | 'student';

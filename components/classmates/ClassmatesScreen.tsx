@@ -29,6 +29,8 @@ interface ClassmatesScreenProps {
     onDisconnect: (id: string) => void;
     onReport?: (id: string, name: string) => void;
     isDarkMode?: boolean;
+    loading?: boolean;
+    error?: string | null;
 }
 
 export function ClassmatesScreen({
@@ -42,6 +44,8 @@ export function ClassmatesScreen({
     onDisconnect,
     onReport,
     isDarkMode = false,
+    loading = false,
+    error = null,
 }: ClassmatesScreenProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const carouselRef = useRef<ICarouselInstance>(null);
@@ -63,6 +67,30 @@ export function ClassmatesScreen({
             }, 1200);
         }
     };
+
+    if (loading) {
+        return (
+            <View style={[styles.container, isDarkMode ? styles.containerDark : styles.containerLight]}>
+                <View style={styles.emptyState}>
+                    <Text style={[styles.emptyTitle, isDarkMode && styles.emptyTitleDark]}>Finding classmates</Text>
+                    <Text style={[styles.emptySubtitle, isDarkMode && styles.emptySubtitleDark]}>
+                        Looking for students in your courses
+                    </Text>
+                </View>
+            </View>
+        );
+    }
+
+    if (error) {
+        return (
+            <View style={[styles.container, isDarkMode ? styles.containerDark : styles.containerLight]}>
+                <View style={styles.emptyState}>
+                    <Text style={[styles.emptyTitle, isDarkMode && styles.emptyTitleDark]}>Couldn't load classmates</Text>
+                    <Text style={[styles.emptySubtitle, isDarkMode && styles.emptySubtitleDark]}>{error}</Text>
+                </View>
+            </View>
+        );
+    }
 
     if (profiles.length === 0) {
         return (

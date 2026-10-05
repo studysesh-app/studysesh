@@ -20,6 +20,7 @@ interface UserProfile {
   profile_visibility: 'everyone' | 'women-nb-only';
   is_tutor: boolean;
   theme: string;
+  prompts?: Array<{ prompt: string; answer: string }>;
 }
 
 interface UseAuthReturn {
@@ -73,6 +74,7 @@ interface CreateProfileData {
     groupPrice?: number;
     individualPrice?: number;
     proofUrl?: string;
+    sessionType?: 'online' | 'in-person' | 'both';
   }>;
 }
 
@@ -142,12 +144,12 @@ export function useAuth(): UseAuthReturn {
     }
 
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (signingOutRef.current) return;
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile().then(setProfile);
+        setProfile(await fetchProfile());
       }
       setLoading(false);
     });
@@ -191,6 +193,9 @@ export function useAuth(): UseAuthReturn {
 
     const emailError = validateEmail(email);
     if (emailError) return { error: emailError, needsVerification: false };
+    if (password.length < 8) {
+      return { error: 'Password must be at least 8 characters.', needsVerification: false };
+    }
 
     const { data, error } = await supabase.auth.signUp({
       email: email.trim().toLowerCase(),
@@ -202,7 +207,7 @@ export function useAuth(): UseAuthReturn {
         return { error: 'This email is already registered. Try signing in.', needsVerification: false };
       }
       if (error.message.includes('password')) {
-        return { error: 'Password must be at least 6 characters.', needsVerification: false };
+        return { error: 'Password must be at least 8 characters.', needsVerification: false };
       }
       return { error: error.message, needsVerification: false };
     }
@@ -351,7 +356,14 @@ export function useAuth(): UseAuthReturn {
       .maybeSingle();
 
     if (error || !data) return null;
-    return data as UserProfile;
+    const profile = data as UserProfile;
+    const { data: promptRows } = await supabase
+      .from('user_prompts')
+      .select('prompt, answer')
+      .eq('user_id', user.id)
+      .order('sort_order');
+    profile.prompts = (promptRows ?? []).map((p) => ({ prompt: p.prompt, answer: p.answer }));
+    return profile;
   }, []);
 
   // Create full profile (after sign-up + verification)
@@ -369,6 +381,7 @@ export function useAuth(): UseAuthReturn {
         profile_visibility: profileData.profileVisibility || 'everyone',
         photo_url: profileData.profileImage || null,
         is_tutor: profileData.isTutor,
+        prompts: profileData.prompts,
       });
       setProfile(demoProfileStore);
       return { error: null };
@@ -378,8 +391,12 @@ export function useAuth(): UseAuthReturn {
     if (!user) return { error: 'Not authenticated' };
 
     try {
+      if (profileData.prompts.length < 3) {
+        return { error: 'Add 3 profile prompts before continuing.' };
+      }
+
       // 1. Insert user profile
-      const { error: profileError } = await supabase.from('users').insert({
+      const { error: profileError } = await supabase.from('users').upsert({
         id: user.id,
         email: user.email!,
         name: profileData.name,
@@ -399,23 +416,16 @@ export function useAuth(): UseAuthReturn {
       }
 
       // 2. Insert prompts
-      if (profileData.prompts.length > 0) {
-        const promptRows = profileData.prompts.map((p, i) => ({
-          user_id: user.id,
-          prompt: p.prompt,
-          answer: p.answer,
-          sort_order: i,
-        }));
+      const promptRows = profileData.prompts.map((p, i) => ({
+        user_id: user.id,
+        prompt: p.prompt,
+        answer: p.answer,
+        sort_order: i,
+      }));
 
-        const { error: promptsError } = await supabase
-          .from('user_prompts')
-          .insert(promptRows);
-
-        if (promptsError) {
-          console.error('Prompts insert error:', promptsError);
-          // Non-fatal — profile was created
-        }
-      }
+      await supabase.from('user_prompts').delete().eq('user_id', user.id);
+      const { error: promptsError } = await supabase.from('user_prompts').insert(promptRows);
+      if (promptsError) return { error: promptsError.message };
 
       // 3. Enroll in courses (look up course IDs by code)
       if (profileData.courses.length > 0) {
@@ -424,20 +434,20 @@ export function useAuth(): UseAuthReturn {
           .select('id, code')
           .in('code', profileData.courses);
 
-        if (courseRows && courseRows.length > 0) {
-          const enrollments = courseRows.map((c) => ({
-            user_id: user.id,
-            course_id: c.id,
-          }));
-
-          const { error: enrollError } = await supabase
-            .from('user_courses')
-            .insert(enrollments);
-
-          if (enrollError) {
-            console.error('Course enrollment error:', enrollError);
-          }
+        const found = new Set((courseRows ?? []).map((c) => c.code));
+        const missing = profileData.courses.filter((code) => !found.has(code));
+        if (missing.length > 0) {
+          return { error: `Couldn't save courses: ${missing.join(', ')}` };
         }
+
+        const { error: clearError } = await supabase.from('user_courses').delete().eq('user_id', user.id);
+        if (clearError) return { error: clearError.message };
+
+        const { error: enrollError } = await supabase
+          .from('user_courses')
+          .insert(courseRows!.map((c) => ({ user_id: user.id, course_id: c.id })));
+
+        if (enrollError) return { error: enrollError.message };
       }
 
       // 4. If tutor, insert tutor courses
@@ -448,30 +458,25 @@ export function useAuth(): UseAuthReturn {
           .select('id, code')
           .in('code', tutorCourseCodes);
 
-        if (tutorCourseRows && tutorCourseRows.length > 0) {
-          const codeToId = Object.fromEntries(tutorCourseRows.map((c) => [c.code, c.id]));
-
-          const tutorInserts = profileData.tutorCourses
-            .filter((tc) => codeToId[tc.courseCode])
-            .map((tc) => ({
-              user_id: user.id,
-              course_id: codeToId[tc.courseCode],
-              group_price: tc.groupPrice ?? null,
-              individual_price: tc.individualPrice ?? null,
-              proof_url: tc.proofUrl ?? null,
-              is_approved: true,
-            }));
-
-          if (tutorInserts.length > 0) {
-            const { error: tutorError } = await supabase
-              .from('tutor_courses')
-              .insert(tutorInserts);
-
-            if (tutorError) {
-              console.error('Tutor course insert error:', tutorError);
-            }
-          }
+        if (!tutorCourseRows || tutorCourseRows.length !== tutorCourseCodes.length) {
+          const foundCodes = new Set((tutorCourseRows ?? []).map((c) => c.code));
+          const missingCodes = tutorCourseCodes.filter((code) => !foundCodes.has(code));
+          return { error: `Couldn't save tutoring courses: ${missingCodes.join(', ')}` };
         }
+
+        const codeToId = Object.fromEntries(tutorCourseRows.map((c) => [c.code, c.id]));
+        const { error: tutorError } = await supabase.from('tutor_courses').upsert(
+          profileData.tutorCourses.map((tc) => ({
+            user_id: user.id,
+            course_id: codeToId[tc.courseCode],
+            group_price: tc.groupPrice ?? null,
+            individual_price: tc.individualPrice ?? null,
+            proof_url: tc.proofUrl ?? null,
+            session_type: tc.sessionType ?? 'both',
+            is_approved: true,
+          }))
+        );
+        if (tutorError) return { error: tutorError.message };
       }
 
       // Refresh profile
@@ -502,6 +507,7 @@ export function useAuth(): UseAuthReturn {
           ...(updates.photoUrl !== undefined && { photo_url: updates.photoUrl }),
           ...(updates.theme !== undefined && { theme: updates.theme }),
           ...(updates.status !== undefined && { status: updates.status }),
+          ...(updates.prompts !== undefined && { prompts: updates.prompts }),
         };
         setProfile(demoProfileStore);
       }
@@ -563,7 +569,16 @@ export function useAuth(): UseAuthReturn {
 
   // Change email (re-authenticates with the current password first; Supabase sends a confirmation link to the new address)
   const updateEmail = useCallback(async (currentPassword: string, newEmail: string): Promise<{ error: string | null }> => {
+    const clean = newEmail.trim().toLowerCase();
+    if (!clean.endsWith(ALLOWED_EMAIL_DOMAIN)) {
+      return { error: `Please use your ${ALLOWED_EMAIL_DOMAIN} email address.` };
+    }
+
     if (DEMO_MODE) {
+      if (demoProfileStore) {
+        demoProfileStore = { ...demoProfileStore, email: clean };
+        setProfile(demoProfileStore);
+      }
       return { error: null };
     }
 
@@ -573,10 +588,18 @@ export function useAuth(): UseAuthReturn {
       if (reauthError) return { error: 'Current password is incorrect.' };
     }
 
-    const { error } = await supabase.auth.updateUser({ email: newEmail.trim().toLowerCase() });
+    const { error } = await supabase.auth.updateUser({ email: clean });
     if (error) return { error: error.message };
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { error: profileError } = await supabase.from('users').update({ email: clean }).eq('id', user.id);
+      if (profileError) return { error: profileError.message };
+      const refreshed = await fetchProfile();
+      setProfile(refreshed);
+    }
     return { error: null };
-  }, [session]);
+  }, [session, fetchProfile]);
 
   // Permanently delete the account (via edge function, since deleting an auth user requires the service role)
   const deleteAccount = useCallback(async (): Promise<{ error: string | null }> => {

@@ -18,6 +18,7 @@ export function useConnections(userId: string | null) {
     const [friendProfiles, setFriendProfiles] = useState<ConnectionProfile[]>([]);
     const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
     const [blocked, setBlocked] = useState<Set<string>>(new Set());
+    const [blockedProfiles, setBlockedProfiles] = useState<Array<{ id: string; name: string }>>([]);
     const [loading, setLoading] = useState(true);
 
     const refresh = useCallback(async () => {
@@ -41,7 +42,22 @@ export function useConnections(userId: string | null) {
 
         setFriends(new Set(friendIds));
         setSentRequests(new Set(pendingSent.map((c) => c.receiver_id)));
-        setBlocked(new Set((blockedRows ?? []).map((b: any) => b.blocked_id)));
+        const blockedIds = (blockedRows ?? []).map((b: any) => b.blocked_id as string);
+        setBlocked(new Set(blockedIds));
+        if (blockedIds.length > 0) {
+            const { data: blockedUsers } = await supabase.from('users').select('id, name').in('id', blockedIds);
+            setBlockedProfiles((prev) =>
+                blockedIds.map((id) => ({
+                    id,
+                    name:
+                        blockedUsers?.find((u) => u.id === id)?.name ||
+                        prev.find((p) => p.id === id)?.name ||
+                        'Unknown User',
+                }))
+            );
+        } else {
+            setBlockedProfiles([]);
+        }
 
         if (friendIds.length > 0) {
             const [{ data: users }, { data: myCourseRows }, { data: friendCourseRows }] = await Promise.all([
@@ -117,12 +133,16 @@ export function useConnections(userId: string | null) {
                 return next;
             });
             if (DEMO_MODE || !userId) return;
-            await supabase
+            const { data: pending } = await supabase
                 .from('connections')
-                .delete()
+                .select('id')
                 .eq('requester_id', userId)
                 .eq('receiver_id', otherUserId)
-                .eq('status', 'pending');
+                .eq('status', 'pending')
+                .maybeSingle();
+            if (!pending) return;
+            await supabase.from('activities').delete().eq('type', 'connection_request').eq('reference_id', pending.id);
+            await supabase.from('connections').delete().eq('id', pending.id);
         },
         [userId]
     );
@@ -152,6 +172,12 @@ export function useConnections(userId: string | null) {
             await supabase.from('connections').update({ status: 'accepted' }).eq('id', connectionId);
             await supabase
                 .from('activities')
+                .delete()
+                .eq('user_id', userId)
+                .eq('type', 'connection_request')
+                .eq('reference_id', connectionId);
+            await supabase
+                .from('activities')
                 .insert({ user_id: conn.requester_id, actor_id: userId, type: 'connection_accepted', reference_id: connectionId });
             await refresh();
         },
@@ -159,9 +185,15 @@ export function useConnections(userId: string | null) {
     );
 
     const declineRequest = useCallback(async (connectionId: string) => {
-        if (DEMO_MODE) return;
+        if (DEMO_MODE || !userId) return;
         await supabase.from('connections').delete().eq('id', connectionId);
-    }, []);
+        await supabase
+            .from('activities')
+            .delete()
+            .eq('user_id', userId)
+            .eq('type', 'connection_request')
+            .eq('reference_id', connectionId);
+    }, [userId]);
 
     const disconnect = useCallback(
         async (otherUserId: string) => {
@@ -182,8 +214,12 @@ export function useConnections(userId: string | null) {
     );
 
     const block = useCallback(
-        async (otherUserId: string) => {
+        async (otherUserId: string, name?: string) => {
             setBlocked((prev) => new Set(prev).add(otherUserId));
+            setBlockedProfiles((prev) => [
+                ...prev.filter((p) => p.id !== otherUserId),
+                { id: otherUserId, name: name || prev.find((p) => p.id === otherUserId)?.name || 'Unknown User' },
+            ]);
             setFriends((prev) => {
                 const next = new Set(prev);
                 next.delete(otherUserId);
@@ -213,6 +249,7 @@ export function useConnections(userId: string | null) {
                 next.delete(otherUserId);
                 return next;
             });
+            setBlockedProfiles((prev) => prev.filter((p) => p.id !== otherUserId));
             if (DEMO_MODE || !userId) return;
             await supabase.from('blocked_users').delete().eq('blocker_id', userId).eq('blocked_id', otherUserId);
         },
@@ -236,6 +273,7 @@ export function useConnections(userId: string | null) {
         friendProfiles,
         sentRequests,
         blocked,
+        blockedProfiles,
         loading,
         refresh,
         toggleConnect,

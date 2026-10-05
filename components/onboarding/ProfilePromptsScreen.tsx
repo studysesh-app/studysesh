@@ -1,6 +1,7 @@
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, KeyboardAvoidingView, Platform, Animated, Dimensions, PanResponder, Easing, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import { ArrowLeft, X, Plus, Minus, ChevronLeft, Check } from 'lucide-react-native';
 import { useState, useRef } from 'react';
+import { DEMO_MODE } from '../../lib/demo';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -195,16 +196,8 @@ export function ProfilePromptsScreen({ onBack, onContinue }: ProfilePromptsScree
     const canSavePrompt = selectedPrompt && draftAnswer.trim().length > 0;
 
     const handleContinue = () => {
-        // DEV: bypassed validation for testing (was: if (isValid))
-        if (true) {
-            // DEV: fallback prompts if none filled
-            const fallbackPrompts = prompts.length > 0 ? prompts : [
-                { prompt: "I study best at...", answer: "the library" },
-                { prompt: "I'm always down to...", answer: "grab coffee" },
-                { prompt: "My go-to study snack is...", answer: "chips" },
-            ];
-            onContinue(fallbackPrompts);
-        }
+        if (!DEMO_MODE && !isValid) return;
+        onContinue(prompts);
     };
 
     // Animation interpolations
@@ -321,9 +314,8 @@ export function ProfilePromptsScreen({ onBack, onContinue }: ProfilePromptsScree
                 <View className="absolute bottom-0 left-0 right-0 p-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
                     <TouchableOpacity
                         onPress={handleContinue}
-                        disabled={false} // DEV: bypassed for testing
-                        className={`w-full py-4 rounded-full shadow-sm ${isValid ? 'bg-red-600' : 'bg-red-600' // DEV: always red for testing
-                            }`}
+                        disabled={!DEMO_MODE && !isValid}
+                        className={`w-full py-4 rounded-full shadow-sm ${DEMO_MODE || isValid ? 'bg-red-600' : 'bg-gray-300'}`}
                     >
                         <Text className="text-center text-white text-base font-semibold">
                             Continue

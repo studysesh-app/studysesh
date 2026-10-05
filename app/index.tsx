@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useLayoutEffect } from 'react';
 import { View, LogBox, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { showAlert } from '../lib/alert';
@@ -120,11 +120,14 @@ export default function App() {
     const [onboardingCourses, setOnboardingCourses] = useState<string[]>([]);
     const [onboardingPassword, setOnboardingPassword] = useState('');
     const [onboardingTutorCourses, setOnboardingTutorCourses] = useState<string[]>([]);
-    const [onboardingTutorPricing, setOnboardingTutorPricing] = useState<any>(null);
+    const [onboardingTutorPricing, setOnboardingTutorPricing] = useState<{
+        prices: Record<string, { group: number; individual: number }>;
+        sessionType: 'online' | 'in-person' | 'both';
+    } | null>(null);
     const [onboardingTutorProofs, setOnboardingTutorProofs] = useState<Record<string, string>>({});
 
     // Auto-login: if user has session + profile, skip onboarding
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!auth.loading && auth.session && auth.profile) {
             setUserRole(auth.profile.is_tutor ? 'tutor' : 'student');
             setIsOnboarding(false);
@@ -172,16 +175,38 @@ export default function App() {
     const profileSubtitle = [studentProfile.year, studentProfile.program].filter(Boolean).join(' ');
 
     const handleViewProfile = (profileId: string) => {
-        // Search classmates first, then connections (accepted friends may no longer appear as "classmates")
         let profile: any = mockClassmates.find((u) => u.id === profileId || u.name === profileId);
         if (!profile) {
             profile = connections.friendProfiles.find((u) => u.id === profileId || u.name === profileId);
         }
 
         if (profile) {
-            setSelectedProfileData(profile);
+            setSelectedProfileData({ ...profile, prompts: profile.prompts ?? [] });
             setSelectedProfileId(profile.id);
+            return;
         }
+
+        if (DEMO_MODE || !profileId) return;
+        supabase
+            .from('users')
+            .select('id, name, pronouns, year, major, photo_url, gender')
+            .eq('id', profileId)
+            .maybeSingle()
+            .then(({ data }) => {
+                if (!data) return;
+                setSelectedProfileData({
+                    id: data.id,
+                    name: data.name,
+                    pronouns: (data.pronouns ?? []).join('/').toLowerCase(),
+                    year: data.year ?? '',
+                    major: data.major ?? '',
+                    gender: data.gender,
+                    photoUrl: data.photo_url ?? undefined,
+                    sharedCourses: [],
+                    prompts: [],
+                });
+                setSelectedProfileId(data.id);
+            });
     };
 
     const handleCloseProfile = () => {
@@ -196,6 +221,8 @@ export default function App() {
         year: string;
         degreeLevel: string;
         major: string;
+        profileVisibility?: 'everyone' | 'women-nb-only';
+        profileImage?: string | null;
     } | null>(null);
     const [onboardingPrompts, setOnboardingPrompts] = useState<Array<{ prompt: string; answer: string }>>([]);
 
@@ -223,7 +250,9 @@ export default function App() {
                 .eq('course_id', course.id)
                 .eq('is_approved', true);
             setCourseTutors(
-                (rows ?? []).map((r: any) => ({
+                (rows ?? [])
+                    .filter((r: any) => r.user_id !== currentUserId && !connections.blocked.has(r.user_id))
+                    .map((r: any) => ({
                     id: r.user_id,
                     name: r.users?.name ?? 'Unknown',
                     pronouns: (r.users?.pronouns ?? []).join('/').toLowerCase(),
@@ -233,7 +262,7 @@ export default function App() {
                 }))
             );
         })();
-    }, [selectedCourse]);
+    }, [selectedCourse, currentUserId, connections.blocked]);
 
     // Load comments whenever a post is opened
     useEffect(() => {
@@ -262,8 +291,20 @@ export default function App() {
     };
 
     const handleBlockUser = (id: string, name: string) => {
-        connections.block(id);
+        connections.block(id, name);
         showAlert('Blocked', `${name} has been blocked.`);
+    };
+
+    const saveSignupPhoto = async (local?: string | null) => {
+        if (!local || DEMO_MODE || local.startsWith('http')) return local ?? null;
+        const uid = auth.user?.id;
+        if (!uid) return null;
+        try {
+            return await uploadAvatar(uid, local);
+        } catch (e) {
+            console.error('Avatar upload failed:', e);
+            return null;
+        }
     };
 
     const handleReportUser = (id: string, name: string) => {
@@ -379,7 +420,7 @@ export default function App() {
                             if (activity?.referenceId) {
                                 connections.acceptRequest(activity.referenceId);
                             }
-                            activityFeed.markRead(id);
+                            activityFeed.removeActivity(id);
                         }}
                         onDeclineConnection={(id) => {
                             const activity = activities.find(a => a.id === id);
@@ -407,13 +448,7 @@ export default function App() {
                         onMarkAllRead={() => {
                             activityFeed.markAllRead();
                         }}
-                        onViewProfile={(name) => {
-                            const user = mockClassmates.find(u => u.name === name);
-                            if (user) {
-                                setSelectedProfileId(user.id);
-                                setSelectedProfileData(user);
-                            }
-                        }}
+                        onViewProfile={(id) => handleViewProfile(id)}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -432,6 +467,8 @@ export default function App() {
                         onViewProfile={(profile) => {
                             handleViewProfile(profile.id);
                         }}
+                        loading={classmatesFeed.loading}
+                        error={classmatesFeed.error}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -525,11 +562,17 @@ export default function App() {
                         }
 
                         // 3. Find or create the conversation with this tutor
-                        const convId = await chat.getOrCreateConversation(id);
-                        if (convId) {
-                            setSelectedConversationId(convId);
-                            await chat.fetchMessages(convId);
+                        if (connections.blocked.has(id)) {
+                            showAlert('Message', "You can't message this person.");
+                            return;
                         }
+                        const convId = await chat.getOrCreateConversation(id);
+                        if (!convId) {
+                            showAlert('Message', "Couldn't start that conversation.");
+                            return;
+                        }
+                        setSelectedConversationId(convId);
+                        await chat.fetchMessages(convId);
                     }}
                     onViewProfile={handleViewProfile}
                     isDarkMode={theme === 'dark'}
@@ -638,6 +681,7 @@ export default function App() {
                             initial={studentProfile.name.charAt(0)}
                             isTutor={userRole === 'tutor'}
                             profileImage={studentProfile.photoUrl}
+                            initialPrompts={auth.profile?.prompts ?? []}
                             onSave={async (data) => {
                                 let photoUrl = data.profileImage;
                                 if (photoUrl && photoUrl.startsWith('file:')) {
@@ -771,14 +815,11 @@ export default function App() {
                 {profileScreen === 'blocked-users' && (
                     <View style={overlayStyle}>
                         <BlockedUsersScreen
-                            blockedUsers={Array.from(blockedUsers).map(id => {
-                                const classmate = mockClassmates.find(c => c.id === id);
-                                return {
-                                    id,
-                                    name: classmate?.name || 'Unknown User',
-                                    initial: classmate?.name?.charAt(0) || '?',
-                                };
-                            })}
+                            blockedUsers={connections.blockedProfiles.map((person) => ({
+                                id: person.id,
+                                name: person.name,
+                                initial: person.name.charAt(0) || '?',
+                            }))}
                             onBack={() => setProfileScreen('settings')}
                             onUnblock={(id) => {
                                 connections.unblock(id);
@@ -816,11 +857,17 @@ export default function App() {
                                     setSocialActiveTab('chat');
                                 }
                                 setProfileScreen('main');
-                                const convId = await chat.getOrCreateConversation(connectionId);
-                                if (convId) {
-                                    setSelectedConversationId(convId);
-                                    await chat.fetchMessages(convId);
+                                if (connections.blocked.has(connectionId)) {
+                                    showAlert('Message', "You can't message this person.");
+                                    return;
                                 }
+                                const convId = await chat.getOrCreateConversation(connectionId);
+                                if (!convId) {
+                                    showAlert('Message', "Couldn't start that conversation.");
+                                    return;
+                                }
+                                setSelectedConversationId(convId);
+                                await chat.fetchMessages(convId);
                             }}
                             onViewProfile={(connectionId) => handleViewProfile(connectionId)}
                             onDisconnect={(connectionId, name) => handleDisconnectUser(connectionId, name)}
@@ -853,9 +900,7 @@ export default function App() {
                         const target = conversation?.otherUserId || conversation?.tutorName || '';
                         handleViewProfile(target);
                     }}
-                    onSendMessage={(text) => {
-                        chat.sendMessage(selectedConversationId, text);
-                    }}
+                    onSendMessage={(text) => chat.sendMessage(selectedConversationId, text)}
                     isTutorView={false}
                     isDarkMode={theme === 'dark'}
                 />
@@ -892,6 +937,8 @@ export default function App() {
                         onViewProfile={(profile) => {
                             handleViewProfile(profile.id);
                         }}
+                        loading={classmatesFeed.loading}
+                        error={classmatesFeed.error}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -921,7 +968,7 @@ export default function App() {
                             if (activity?.referenceId) {
                                 connections.acceptRequest(activity.referenceId);
                             }
-                            activityFeed.markRead(id);
+                            activityFeed.removeActivity(id);
                         }}
                         onDeclineConnection={(id) => {
                             const activity = activities.find(a => a.id === id);
@@ -949,13 +996,7 @@ export default function App() {
                         onMarkAllRead={() => {
                             activityFeed.markAllRead();
                         }}
-                        onViewProfile={(name) => {
-                            const user = mockClassmates.find(u => u.name === name);
-                            if (user) {
-                                setSelectedProfileId(user.id);
-                                setSelectedProfileData(user);
-                            }
-                        }}
+                        onViewProfile={(id) => handleViewProfile(id)}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -1133,6 +1174,7 @@ export default function App() {
                         onComplete={async () => {
                             if (onboardingProfileBasics) {
                                 setAuthLoading(true);
+                                const photoUrl = await saveSignupPhoto(onboardingProfileBasics.profileImage);
                                 const { error } = await auth.createProfile({
                                     name: onboardingProfileBasics.name,
                                     pronouns: onboardingProfileBasics.pronouns,
@@ -1140,6 +1182,8 @@ export default function App() {
                                     year: onboardingProfileBasics.year,
                                     degreeLevel: onboardingProfileBasics.degreeLevel,
                                     major: onboardingProfileBasics.major,
+                                    profileVisibility: onboardingProfileBasics.profileVisibility,
+                                    profileImage: photoUrl,
                                     prompts: onboardingPrompts,
                                     courses: onboardingCourses,
                                     isTutor: false,
@@ -1182,8 +1226,8 @@ export default function App() {
                     <TutorPricingSetupScreen
                         courses={onboardingTutorCourses.length > 0 ? onboardingTutorCourses : onboardingCourses}
                         onBack={() => setOnboardingScreen('tutor-proof-upload')}
-                        onContinue={(pricing) => {
-                            setOnboardingTutorPricing(pricing);
+                        onContinue={(pricing, sessionType) => {
+                            setOnboardingTutorPricing({ prices: pricing, sessionType });
                             setOnboardingScreen('tutor-success');
                         }}
                         isDarkMode={theme === 'dark'}
@@ -1195,14 +1239,15 @@ export default function App() {
                         onComplete={async () => {
                             if (onboardingProfileBasics) {
                                 setAuthLoading(true);
-                                // Build tutor course data with pricing
+                                const photoUrl = await saveSignupPhoto(onboardingProfileBasics.profileImage);
                                 const tutorCourseData = (onboardingTutorCourses.length > 0 ? onboardingTutorCourses : onboardingCourses).map((code) => {
-                                    const pricing = onboardingTutorPricing?.[code] || {};
+                                    const pricing = onboardingTutorPricing?.prices?.[code] || { group: 6, individual: 20 };
                                     return {
                                         courseCode: code,
-                                        groupPrice: pricing.groupPrice ?? null,
-                                        individualPrice: pricing.individualPrice ?? null,
+                                        groupPrice: pricing.group,
+                                        individualPrice: pricing.individual,
                                         proofUrl: onboardingTutorProofs[code],
+                                        sessionType: onboardingTutorPricing?.sessionType ?? 'both',
                                     };
                                 });
 
@@ -1213,6 +1258,8 @@ export default function App() {
                                     year: onboardingProfileBasics.year,
                                     degreeLevel: onboardingProfileBasics.degreeLevel,
                                     major: onboardingProfileBasics.major,
+                                    profileVisibility: onboardingProfileBasics.profileVisibility,
+                                    profileImage: photoUrl,
                                     prompts: onboardingPrompts,
                                     courses: onboardingCourses,
                                     isTutor: true,
@@ -1239,7 +1286,9 @@ export default function App() {
             <SafeAreaView style={{ flex: 1, backgroundColor: theme === 'dark' ? '#111827' : 'white' }}>
                 <StatusBar style={theme === 'dark' ? 'light' : 'auto'} />
                 <View className="flex-1">
-                    {isOnboarding ? (
+                    {auth.loading ? (
+                        <View style={{ flex: 1 }} />
+                    ) : isOnboarding ? (
                         renderOnboarding()
                     ) : (
                         <OnboardingToAppTransition show={true} isDarkMode={theme === 'dark'}>

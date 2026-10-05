@@ -86,15 +86,17 @@ export function usePosts(courseCode: string | null, userId: string | null) {
 
     const createPost = useCallback(
         async (content: string, type: 'post' | 'question') => {
-            if (DEMO_MODE || !courseCode || !userId) return;
+            if (DEMO_MODE) return true;
+            if (!courseCode || !userId) return false;
             const { data: course } = await supabase.from('courses').select('id').eq('code', courseCode).single();
-            if (!course) return;
+            if (!course) return false;
             const { error } = await supabase.from('posts').insert({ author_id: userId, course_id: course.id, content, type });
             if (error) {
                 console.error('Create post error:', error);
-                return;
+                return false;
             }
             await refresh();
+            return true;
         },
         [courseCode, userId, refresh]
     );

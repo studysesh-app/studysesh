@@ -1,6 +1,7 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Dimensions } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
 import { ArrowLeft, Eye, EyeOff, Check } from 'lucide-react-native';
 import { useState } from 'react';
+import { showAlert } from '../../lib/alert';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 
@@ -22,11 +23,11 @@ export function ChangePasswordScreen({ onBack, onSave, isDarkMode = false }: Cha
 
     const handleSave = () => {
         if (newPassword !== confirmPassword) {
-            Alert.alert('Error', 'Passwords do not match');
+            showAlert('Error', 'Passwords do not match');
             return;
         }
         if (newPassword.length < 8) {
-            Alert.alert('Error', 'Password must be at least 8 characters');
+            showAlert('Error', 'Password must be at least 8 characters');
             return;
         }
         onSave(currentPassword, newPassword);

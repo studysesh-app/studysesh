@@ -1,6 +1,7 @@
 import { View, Text, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, ScrollView, Dimensions, LayoutAnimation, UIManager, Modal, Animated, PanResponder, Easing, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import { ArrowLeft, Camera, User, BookOpen, Eye, X, Plus, Minus, ChevronLeft, Check } from 'lucide-react-native';
 import { useState, useRef, useEffect } from 'react';
+import { showAlert } from '../../lib/alert';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import AnimatedReanimated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing as ReanimatedEasing } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
@@ -86,6 +87,7 @@ interface EditProfileScreenProps {
     }) => void;
     isDarkMode?: boolean;
     profileImage?: string | null;
+    initialPrompts?: Array<{ prompt: string; answer: string }>;
 }
 
 export function EditProfileScreen({
@@ -103,6 +105,7 @@ export function EditProfileScreen({
     onSave,
     isDarkMode = false,
     profileImage: initialProfileImage,
+    initialPrompts = [],
 }: EditProfileScreenProps) {
     // Parse initial pronouns (e.g., "he/him" -> ["He", "Him"])
     const parsePronouns = (pronounsStr: string): string[] => {
@@ -124,7 +127,7 @@ export function EditProfileScreen({
     const [profileVisibility, setProfileVisibility] = useState<string[]>(
         initialProfileVisibility ? [initialProfileVisibility] : ['everyone']
     );
-    const [prompts, setPrompts] = useState<Array<{ prompt: string; answer: string }>>([]);
+    const [prompts, setPrompts] = useState<Array<{ prompt: string; answer: string }>>(initialPrompts);
     const [profileImage, setProfileImage] = useState<string | null>(initialProfileImage || null);
 
     const scrollViewRef = useRef<ScrollView>(null);
@@ -344,17 +347,23 @@ export function EditProfileScreen({
     });
 
     const handleSave = () => {
-        const pronounsStr = pronouns.length > 0 ? pronouns.join('/') : initialPronouns;
+        if (!name.trim()) {
+            showAlert('Name required', 'Enter the name you want on your profile.');
+            return;
+        }
         onSave({
-            name,
+            name: name.trim(),
             pronouns: pronouns,
             gender: gender[0] || 'Prefer not to say',
             year,
             degreeLevel: degreeLevel || "Bachelor's",
             program,
             bio: isTutor ? bio : undefined,
-            profileVisibility: showVisibilityOption ? (profileVisibility[0] as 'everyone' | 'women-nb-only') : undefined,
-            prompts: prompts.length > 0 ? prompts : undefined,
+            profileVisibility: showVisibilityOption
+                ? (profileVisibility[0] as 'everyone' | 'women-nb-only')
+                : 'everyone',
+            prompts,
+            profileImage,
         });
     };
 

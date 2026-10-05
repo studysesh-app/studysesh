@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ChatInputProps {
-    onSend: (message: string) => void;
+    onSend: (message: string) => void | Promise<boolean | void>;
     placeholder?: string;
     isDarkMode?: boolean;
 }
@@ -14,11 +14,11 @@ export function ChatInput({ onSend, placeholder = 'Type a message...', isDarkMod
     const [message, setMessage] = useState('');
     const insets = useSafeAreaInsets();
 
-    const handleSend = () => {
-        if (message.trim()) {
-            onSend(message.trim());
-            setMessage('');
-        }
+    const handleSend = async () => {
+        const text = message.trim();
+        if (!text) return;
+        const sent = await onSend(text);
+        if (sent !== false) setMessage('');
     };
 
     return (

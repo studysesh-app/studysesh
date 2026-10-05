@@ -1,6 +1,7 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Dimensions } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
 import { ArrowLeft, Mail, Eye, EyeOff } from 'lucide-react-native';
 import { useState } from 'react';
+import { showAlert } from '../../lib/alert';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 
@@ -18,15 +19,15 @@ export function ChangeEmailScreen({ currentEmail, onBack, onSave, isDarkMode = f
     const [currentPassword, setCurrentPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
 
-    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail);
+    const isCarletonEmail = newEmail.trim().toLowerCase().endsWith('@cmail.carleton.ca');
 
     const handleSave = () => {
-        if (!isValidEmail) {
-            Alert.alert('Error', 'Please enter a valid email address');
+        if (!isCarletonEmail) {
+            showAlert('Error', 'Use your @cmail.carleton.ca email address.');
             return;
         }
         if (newEmail.toLowerCase() === currentEmail.toLowerCase()) {
-            Alert.alert('Error', 'That is already your current email');
+            showAlert('Error', 'That is already your current email');
             return;
         }
         onSave(newEmail, currentPassword);
