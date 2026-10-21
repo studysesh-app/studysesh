@@ -24,6 +24,7 @@ export function useCourses(userId: string | null) {
     const [tutorPricing, setTutorPricing] = useState<TutorCoursePricing[]>([]);
     const [catalog, setCatalog] = useState<CourseSummary[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
         if (DEMO_MODE || !userId) {
@@ -31,11 +32,21 @@ export function useCourses(userId: string | null) {
             return;
         }
         setLoading(true);
+        setError(null);
 
-        const [{ data: myCourseRows }, { data: myTutorRows }] = await Promise.all([
+        const [myCoursesResult, myTutorsResult] = await Promise.all([
             supabase.from('user_courses').select('courses(code)').eq('user_id', userId),
             supabase.from('tutor_courses').select('group_price, individual_price, session_type, courses(code)').eq('user_id', userId),
         ]);
+        if (myCoursesResult.error || myTutorsResult.error) {
+            const queryError = myCoursesResult.error ?? myTutorsResult.error!;
+            console.error('Fetch enrolled courses error:', queryError);
+            setError(queryError.message);
+            setLoading(false);
+            return;
+        }
+        const myCourseRows = myCoursesResult.data;
+        const myTutorRows = myTutorsResult.data;
 
         const studying = (myCourseRows ?? []).map((r: any) => r.courses?.code).filter(Boolean);
         const tutoring = (myTutorRows ?? []).map((r: any) => r.courses?.code).filter(Boolean);
@@ -54,24 +65,42 @@ export function useCourses(userId: string | null) {
 
         const codes = [...new Set([...studying, ...tutoring])];
         if (codes.length > 0) {
-            const { data: courseRows } = await supabase.from('courses').select('id, code, name').in('code', codes);
-            const summaries = await Promise.all(
+            const { data: courseRows, error: courseError } = await supabase.from('courses').select('id, code, name').in('code', codes);
+            if (courseError) {
+                console.error('Fetch course catalog error:', courseError);
+                setError(courseError.message);
+                setLoading(false);
+                return;
+            }
+            const summaryResults = await Promise.all(
                 (courseRows ?? []).map(async (c) => {
-                    const [{ count: studentCount }, { count: tutorCount }, { count: activeCount }] = await Promise.all([
+                    const counts = await Promise.all([
                         supabase.from('user_courses').select('*', { count: 'exact', head: true }).eq('course_id', c.id),
                         supabase.from('tutor_courses').select('*', { count: 'exact', head: true }).eq('course_id', c.id),
                         supabase.from('posts').select('*', { count: 'exact', head: true }).eq('course_id', c.id),
                     ]);
+                    const countError = counts.find((result) => result.error)?.error;
+                    if (countError) return { error: countError.message, summary: null };
                     return {
-                        code: c.code,
-                        name: c.name,
-                        studentCount: studentCount ?? 0,
-                        tutorCount: tutorCount ?? 0,
-                        activeCount: activeCount ?? 0,
+                        error: null,
+                        summary: {
+                            code: c.code,
+                            name: c.name,
+                            studentCount: counts[0].count ?? 0,
+                            tutorCount: counts[1].count ?? 0,
+                            activeCount: counts[2].count ?? 0,
+                        },
                     };
                 })
             );
-            setCatalog(summaries);
+            const countError = summaryResults.find((result) => result.error)?.error;
+            if (countError) {
+                console.error('Fetch course counts error:', countError);
+                setError(countError);
+                setLoading(false);
+                return;
+            }
+            setCatalog(summaryResults.flatMap((result) => result.summary ? [result.summary] : []));
         } else {
             setCatalog([]);
         }
@@ -83,47 +112,75 @@ export function useCourses(userId: string | null) {
         refresh();
     }, [refresh]);
 
-    const addStudyingCourse = useCallback(async (code: string) => {
+    const addStudyingCourse = useCallback(async (code: string): Promise<string | null> => {
         if (DEMO_MODE || !userId) {
             setStudyingCourses((prev) => [...new Set([...prev, code])]);
-            return;
+            return null;
         }
-        const { data: course } = await supabase.from('courses').select('id').eq('code', code).single();
-        if (!course) return;
-        await supabase.from('user_courses').insert({ user_id: userId, course_id: course.id });
+        setError(null);
+        const { data: course, error: courseError } = await supabase.from('courses').select('id').eq('code', code).single();
+        if (courseError || !course) {
+            const message = courseError?.message ?? `Course ${code} was not found.`;
+            setError(message);
+            return message;
+        }
+        const { error } = await supabase.from('user_courses').insert({ user_id: userId, course_id: course.id });
+        if (error) {
+            console.error('Enroll in course error:', error);
+            setError(error.message);
+            return error.message;
+        }
         await refresh();
+        return null;
     }, [userId, refresh]);
 
-    const removeStudyingCourse = useCallback(async (code: string) => {
+    const removeStudyingCourse = useCallback(async (code: string): Promise<string | null> => {
         if (DEMO_MODE || !userId) {
             setStudyingCourses((prev) => prev.filter((c) => c !== code));
-            return;
+            return null;
         }
-        const { data: course } = await supabase.from('courses').select('id').eq('code', code).single();
-        if (!course) return;
-        await supabase.from('user_courses').delete().eq('user_id', userId).eq('course_id', course.id);
+        setError(null);
+        const { data: course, error: courseError } = await supabase.from('courses').select('id').eq('code', code).single();
+        if (courseError || !course) {
+            const message = courseError?.message ?? `Course ${code} was not found.`;
+            setError(message);
+            return message;
+        }
+        const { error } = await supabase.from('user_courses').delete().eq('user_id', userId).eq('course_id', course.id);
+        if (error) {
+            console.error('Unenroll from course error:', error);
+            setError(error.message);
+            return error.message;
+        }
         await refresh();
+        return null;
     }, [userId, refresh]);
 
-    const setAllStudyingCourses = useCallback(async (codes: string[]) => {
+    const setAllStudyingCourses = useCallback(async (codes: string[]): Promise<string | null> => {
         if (DEMO_MODE || !userId) {
             setStudyingCourses(codes);
-            return;
+            return null;
         }
         const toAdd = codes.filter((c) => !studyingCourses.includes(c));
         const toRemove = studyingCourses.filter((c) => !codes.includes(c));
-        await Promise.all([...toAdd.map((c) => addStudyingCourse(c)), ...toRemove.map((c) => removeStudyingCourse(c))]);
+        const results = await Promise.all([...toAdd.map(addStudyingCourse), ...toRemove.map(removeStudyingCourse)]);
+        return results.find((result) => result !== null) ?? null;
     }, [studyingCourses, addStudyingCourse, removeStudyingCourse]);
 
     const addTutoringCourse = useCallback(
-        async (code: string, opts?: { groupPrice?: number; individualPrice?: number; proofUrl?: string }) => {
+        async (code: string, opts?: { groupPrice?: number; individualPrice?: number; proofUrl?: string }): Promise<string | null> => {
             if (DEMO_MODE || !userId) {
                 setTutoringCourses((prev) => [...new Set([...prev, code])]);
-                return;
+                return null;
             }
-            const { data: course } = await supabase.from('courses').select('id').eq('code', code).single();
-            if (!course) return;
-            await supabase.from('tutor_courses').insert({
+            setError(null);
+            const { data: course, error: courseError } = await supabase.from('courses').select('id').eq('code', code).single();
+            if (courseError || !course) {
+                const message = courseError?.message ?? `Course ${code} was not found.`;
+                setError(message);
+                return message;
+            }
+            const { error } = await supabase.from('tutor_courses').insert({
                 user_id: userId,
                 course_id: course.id,
                 group_price: opts?.groupPrice ?? null,
@@ -131,20 +188,37 @@ export function useCourses(userId: string | null) {
                 proof_url: opts?.proofUrl ?? null,
                 is_approved: true,
             });
+            if (error) {
+                console.error('Add tutoring course error:', error);
+                setError(error.message);
+                return error.message;
+            }
             await refresh();
+            return null;
         },
         [userId, refresh]
     );
 
-    const removeTutoringCourse = useCallback(async (code: string) => {
+    const removeTutoringCourse = useCallback(async (code: string): Promise<string | null> => {
         if (DEMO_MODE || !userId) {
             setTutoringCourses((prev) => prev.filter((c) => c !== code));
-            return;
+            return null;
         }
-        const { data: course } = await supabase.from('courses').select('id').eq('code', code).single();
-        if (!course) return;
-        await supabase.from('tutor_courses').delete().eq('user_id', userId).eq('course_id', course.id);
+        setError(null);
+        const { data: course, error: courseError } = await supabase.from('courses').select('id').eq('code', code).single();
+        if (courseError || !course) {
+            const message = courseError?.message ?? `Course ${code} was not found.`;
+            setError(message);
+            return message;
+        }
+        const { error } = await supabase.from('tutor_courses').delete().eq('user_id', userId).eq('course_id', course.id);
+        if (error) {
+            console.error('Remove tutoring course error:', error);
+            setError(error.message);
+            return error.message;
+        }
         await refresh();
+        return null;
     }, [userId, refresh]);
 
     /** Saves the full tutoring course list, uploading any newly-picked proof files (keyed by course code). */
@@ -152,7 +226,7 @@ export function useCourses(userId: string | null) {
         async (codes: string[], proofUris?: Record<string, string>) => {
             if (DEMO_MODE || !userId) {
                 setTutoringCourses(codes);
-                return;
+                return null;
             }
             const toAdd = codes.filter((c) => !tutoringCourses.includes(c));
             const toRemove = tutoringCourses.filter((c) => !codes.includes(c));
@@ -165,11 +239,16 @@ export function useCourses(userId: string | null) {
                         proofUrl = await uploadTutorProof(userId, code, uri);
                     } catch (e) {
                         console.error('Proof upload failed:', e);
+                        const message = e instanceof Error ? e.message : 'Tutor proof upload failed.';
+                        setError(message);
+                        return message;
                     }
                 }
-                await addTutoringCourse(code, { proofUrl });
+                const error = await addTutoringCourse(code, { proofUrl });
+                if (error) return error;
             }
-            await Promise.all(toRemove.map((c) => removeTutoringCourse(c)));
+            const results = await Promise.all(toRemove.map(removeTutoringCourse));
+            return results.find((result) => result !== null) ?? null;
         },
         [tutoringCourses, addTutoringCourse, removeTutoringCourse, userId]
     );
@@ -181,7 +260,7 @@ export function useCourses(userId: string | null) {
             globalIndividualPrice: number;
             perCoursePricing: Record<string, { group: number; individual: number }>;
             sessionType: 'online' | 'in-person' | 'both';
-        }) => {
+        }): Promise<string | null> => {
             if (DEMO_MODE || !userId) {
                 setTutorPricing((prev) =>
                     prev.map((p) => ({
@@ -193,12 +272,18 @@ export function useCourses(userId: string | null) {
                             : (data.perCoursePricing[p.code]?.individual ?? p.individualPrice),
                     }))
                 );
-                return;
+                return null;
             }
-            const { data: rows } = await supabase
+            setError(null);
+            const { data: rows, error: rowsError } = await supabase
                 .from('tutor_courses')
                 .select('course_id, courses(code)')
                 .eq('user_id', userId);
+            if (rowsError) {
+                console.error('Load tutoring courses for pricing error:', rowsError);
+                setError(rowsError.message);
+                return rowsError.message;
+            }
             for (const row of rows ?? []) {
                 const code = (row as any).courses?.code as string | undefined;
                 if (!code) continue;
@@ -206,7 +291,7 @@ export function useCourses(userId: string | null) {
                 const individual = data.applyToAll
                     ? data.globalIndividualPrice
                     : (data.perCoursePricing[code]?.individual ?? data.globalIndividualPrice);
-                await supabase
+                const { error } = await supabase
                     .from('tutor_courses')
                     .update({
                         group_price: group,
@@ -215,8 +300,14 @@ export function useCourses(userId: string | null) {
                     })
                     .eq('user_id', userId)
                     .eq('course_id', (row as any).course_id);
+                if (error) {
+                    console.error('Save tutor pricing error:', error);
+                    setError(error.message);
+                    return error.message;
+                }
             }
             await refresh();
+            return null;
         },
         [userId, refresh]
     );
@@ -226,6 +317,7 @@ export function useCourses(userId: string | null) {
         tutoringCourses,
         catalog,
         loading,
+        error,
         addStudyingCourse,
         removeStudyingCourse,
         setAllStudyingCourses,

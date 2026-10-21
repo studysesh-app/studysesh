@@ -234,22 +234,43 @@ export default function App() {
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [postComments, setPostComments] = useState<Awaited<ReturnType<typeof boardPosts.fetchComments>>>([]);
     const [courseTutors, setCourseTutors] = useState<Array<{ id: string; name: string; pronouns: string; groupPrice: string | null; individualPrice: string | null; location: string[] }>>([]);
+    const [courseTutorsLoading, setCourseTutorsLoading] = useState(false);
+    const [courseTutorsError, setCourseTutorsError] = useState<string | null>(null);
+    const [courseTutorRetry, setCourseTutorRetry] = useState(0);
 
     // Fetch tutors for the currently-open course board
     useEffect(() => {
         if (DEMO_MODE || !selectedCourse) {
             setCourseTutors([]);
+            setCourseTutorsError(null);
+            setCourseTutorsLoading(false);
             return;
         }
+        let isCurrent = true;
+        setCourseTutors([]);
+        setCourseTutorsError(null);
+        setCourseTutorsLoading(true);
         (async () => {
-            const { data: course } = await supabase.from('courses').select('id').eq('code', selectedCourse).single();
-            if (!course) return;
-            const { data: rows } = await supabase
+            const { data: course, error: courseError } = await supabase.from('courses').select('id').eq('code', selectedCourse).single();
+            if (courseError || !course) {
+                const message = courseError?.message ?? `Course ${selectedCourse} was not found.`;
+                console.error('Find course tutors error:', courseError ?? message);
+                if (isCurrent) setCourseTutorsError(message);
+                if (isCurrent) setCourseTutorsLoading(false);
+                return;
+            }
+            const { data: rows, error: tutorsError } = await supabase
                 .from('tutor_courses')
                 .select('user_id, group_price, individual_price, session_type, users(name, pronouns)')
                 .eq('course_id', course.id)
                 .eq('is_approved', true);
-            setCourseTutors(
+            if (tutorsError) {
+                console.error('Fetch course tutors error:', tutorsError);
+                if (isCurrent) setCourseTutorsError(tutorsError.message);
+                if (isCurrent) setCourseTutorsLoading(false);
+                return;
+            }
+            if (isCurrent) setCourseTutors(
                 (rows ?? [])
                     .filter((r: any) => r.user_id !== currentUserId && !connections.blocked.has(r.user_id))
                     .map((r: any) => ({
@@ -261,8 +282,19 @@ export default function App() {
                     location: r.session_type === 'both' ? ['online', 'in-person'] : [r.session_type ?? 'online'],
                 }))
             );
-        })();
-    }, [selectedCourse, currentUserId, connections.blocked]);
+            if (isCurrent) setCourseTutorsLoading(false);
+        })().catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : 'An unexpected error occurred while loading tutors.';
+            console.error('Fetch course tutors failed:', error);
+            if (isCurrent) {
+                setCourseTutorsError(message);
+                setCourseTutorsLoading(false);
+            }
+        });
+        return () => {
+            isCurrent = false;
+        };
+    }, [selectedCourse, currentUserId, connections.blocked, courseTutorRetry]);
 
     // Load comments whenever a post is opened
     useEffect(() => {
@@ -281,17 +313,25 @@ export default function App() {
     const sentConnectionRequests = connections.sentRequests;
     const blockedUsers = connections.blocked;
 
-    const handleToggleConnect = (id: string) => {
-        connections.toggleConnect(id);
+    const handleToggleConnect = async (id: string) => {
+        return await connections.toggleConnect(id);
     };
 
-    const handleDisconnectUser = (id: string, name: string) => {
-        connections.disconnect(id);
+    const handleDisconnectUser = async (id: string, name: string) => {
+        const error = await connections.disconnect(id);
+        if (error) {
+            showAlert('Could not disconnect', error);
+            return;
+        }
         showAlert('Disconnected', `You are no longer connected with ${name}.`);
     };
 
-    const handleBlockUser = (id: string, name: string) => {
-        connections.block(id, name);
+    const handleBlockUser = async (id: string, name: string) => {
+        const error = await connections.block(id, name);
+        if (error) {
+            showAlert('Could not block user', error);
+            return;
+        }
         showAlert('Blocked', `${name} has been blocked.`);
     };
 
@@ -299,16 +339,15 @@ export default function App() {
         if (!local || DEMO_MODE || local.startsWith('http')) return local ?? null;
         const uid = auth.user?.id;
         if (!uid) return null;
-        try {
-            return await uploadAvatar(uid, local);
-        } catch (e) {
-            console.error('Avatar upload failed:', e);
-            return null;
-        }
+        return await uploadAvatar(uid, local);
     };
 
-    const handleReportUser = (id: string, name: string) => {
-        connections.report(id, 'Reported from Connect');
+    const handleReportUser = async (id: string, name: string) => {
+        const error = await connections.report(id, 'Reported from Connect');
+        if (error) {
+            showAlert('Could not submit report', error);
+            return;
+        }
         openSupportEmail(
             `Report: ${name}`,
             `I would like to report ${name} (user id: ${id}).\n\nReason:\n`
@@ -356,10 +395,20 @@ export default function App() {
         }
     }, [theme]);
 
-    const handleThemeChange = (newTheme: 'light' | 'dark') => {
+    const handleThemeChange = async (newTheme: 'light' | 'dark') => {
+        const previousTheme = theme;
         setTheme(newTheme);
-        AsyncStorage.setItem('studysesh-theme', newTheme).catch(() => {});
-        auth.updateProfile({ theme: newTheme });
+        try {
+            await AsyncStorage.setItem('studysesh-theme', newTheme);
+        } catch (error) {
+            console.error('Save local theme error:', error);
+            showAlert('Could not save theme', error instanceof Error ? error.message : 'Please try again.');
+        }
+        const { error } = await auth.updateProfile({ theme: newTheme });
+        if (error) {
+            setTheme(previousTheme);
+            showAlert('Could not save theme', error);
+        }
     };
 
     const handleLogout = async () => {
@@ -401,8 +450,14 @@ export default function App() {
     }, [auth.profile?.status]);
 
     const handleStatusChange = (status: string) => {
+        const previousStatus = userStatus;
         setUserStatus(status);
-        auth.updateProfile({ status });
+        auth.updateProfile({ status }).then(({ error }) => {
+            if (error) {
+                setUserStatus(previousStatus);
+                showAlert('Could not save status', error);
+            }
+        });
     };
 
     // Tutor mode render function
@@ -415,19 +470,29 @@ export default function App() {
                 return (
                     <ActivityScreen
                         activities={activities}
-                        onAcceptConnection={(id) => {
+                        onAcceptConnection={async (id) => {
                             const activity = activities.find(a => a.id === id);
                             if (activity?.referenceId) {
-                                connections.acceptRequest(activity.referenceId);
+                                const error = await connections.acceptRequest(activity.referenceId);
+                                if (error) {
+                                    showAlert('Could not accept request', error);
+                                    return;
+                                }
                             }
-                            activityFeed.removeActivity(id);
+                            const error = await activityFeed.removeActivity(id);
+                            if (error) showAlert('Could not clear activity', error);
                         }}
-                        onDeclineConnection={(id) => {
+                        onDeclineConnection={async (id) => {
                             const activity = activities.find(a => a.id === id);
                             if (activity?.referenceId) {
-                                connections.declineRequest(activity.referenceId);
+                                const error = await connections.declineRequest(activity.referenceId);
+                                if (error) {
+                                    showAlert('Could not decline request', error);
+                                    return;
+                                }
                             }
-                            activityFeed.removeActivity(id);
+                            const error = await activityFeed.removeActivity(id);
+                            if (error) showAlert('Could not clear activity', error);
                         }}
                         onActivityTap={(activity) => {
                             activityFeed.markRead(activity.id);
@@ -449,6 +514,9 @@ export default function App() {
                             activityFeed.markAllRead();
                         }}
                         onViewProfile={(id) => handleViewProfile(id)}
+                        loading={activityFeed.loading}
+                        error={activityFeed.error}
+                        onRetry={activityFeed.refresh}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -467,8 +535,12 @@ export default function App() {
                         onViewProfile={(profile) => {
                             handleViewProfile(profile.id);
                         }}
-                        loading={classmatesFeed.loading}
-                        error={classmatesFeed.error}
+                        loading={classmatesFeed.loading || connections.loading}
+                        error={classmatesFeed.error ?? connections.error}
+                        onRetry={() => {
+                            classmatesFeed.refresh();
+                            connections.refresh();
+                        }}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -484,6 +556,9 @@ export default function App() {
                         onDeleteConversation={(conversationId) => {
                             chat.deleteConversation(conversationId);
                         }}
+                        loading={chat.loading}
+                        error={chat.error}
+                        onRetry={chat.refreshConversations}
                         isTutor={true}
                         isDarkMode={theme === 'dark'}
                     />
@@ -521,6 +596,9 @@ export default function App() {
             }}
             userStatus={userStatus}
             onStatusChange={handleStatusChange}
+            loading={courses.loading}
+            error={courses.error}
+            onRetry={courses.refresh}
             isDarkMode={theme === 'dark'}
         />
     );
@@ -575,6 +653,12 @@ export default function App() {
                         await chat.fetchMessages(convId);
                     }}
                     onViewProfile={handleViewProfile}
+                    postsLoading={boardPosts.loading}
+                    postsError={boardPosts.error}
+                    onRetryPosts={boardPosts.refresh}
+                    tutorsLoading={courseTutorsLoading}
+                    tutorsError={courseTutorsError}
+                    onRetryTutors={() => setCourseTutorRetry((retry) => retry + 1)}
                     isDarkMode={theme === 'dark'}
                 />
             </View>
@@ -602,18 +686,25 @@ export default function App() {
                     type={post.type}
                     onBack={() => setSelectedPostId(null)}
                     onLikePost={() => boardPosts.toggleLike(post.id)}
-                    onLikeComment={(commentId) => {
+                    onLikeComment={async (commentId) => {
                         const comment = postComments.find(c => c.id === commentId);
-                        if (!comment) return;
-                        setPostComments(prev => prev.map(c => c.id === commentId ? { ...c, isLiked: !c.isLiked, likes: c.likes + (c.isLiked ? -1 : 1) } : c));
-                        boardPosts.toggleCommentLike(commentId, comment.isLiked);
+                        if (!comment) return false;
+                        const success = await boardPosts.toggleCommentLike(commentId, comment.isLiked);
+                        if (success) {
+                            setPostComments(prev => prev.map(c => c.id === commentId ? { ...c, isLiked: !c.isLiked, likes: c.likes + (c.isLiked ? -1 : 1) } : c));
+                        }
+                        return success;
                     }}
                     onAddComment={async (content, parentId) => {
-                        await boardPosts.addComment(post.id, content, parentId);
+                        const added = await boardPosts.addComment(post.id, content, parentId);
+                        if (!added) return false;
                         const updated = await boardPosts.fetchComments(post.id);
                         setPostComments(updated);
+                        return true;
                     }}
                     onViewProfile={handleViewProfile}
+                    commentsError={boardPosts.error}
+                    onRetryComments={async () => setPostComments(await boardPosts.fetchComments(post.id))}
                     isDarkMode={theme === 'dark'}
                 />
             </View>
@@ -686,9 +777,12 @@ export default function App() {
                                 let photoUrl = data.profileImage;
                                 if (photoUrl && photoUrl.startsWith('file:')) {
                                     try {
-                                        photoUrl = currentUserId ? await uploadAvatar(currentUserId, photoUrl) : photoUrl;
-                                    } catch (e) {
-                                        console.error('Avatar upload failed:', e);
+                                        if (!currentUserId) throw new Error('Your account is not ready to upload a profile photo.');
+                                        photoUrl = await uploadAvatar(currentUserId, photoUrl);
+                                    } catch (error) {
+                                        console.error('Avatar upload failed:', error);
+                                        showAlert('Photo upload failed', error instanceof Error ? error.message : 'Please try uploading your photo again.');
+                                        return;
                                     }
                                 }
                                 const { error } = await auth.updateProfile({
@@ -720,14 +814,8 @@ export default function App() {
                             selectedCourses={myStudyingCourses}
                             tutoringCourses={myTutoringCourses}
                             isTutor={isTutor}
-                            onSave={(newCourses) => {
-                                courses.setAllStudyingCourses(newCourses);
-                                setProfileScreen('main');
-                            }}
-                            onSaveTutoring={(newCourses, proofUris) => {
-                                courses.setAllTutoringCourses(newCourses, proofUris);
-                                setProfileScreen('main');
-                            }}
+                            onSave={(newCourses) => courses.setAllStudyingCourses(newCourses)}
+                            onSaveTutoring={(newCourses, proofUris) => courses.setAllTutoringCourses(newCourses, proofUris)}
                             isDarkMode={theme === 'dark'}
                         />
                     </View>
@@ -750,7 +838,11 @@ export default function App() {
                             initialSessionType={courses.tutorPricing[0]?.sessionType ?? tutorPricingSessionType}
                             onBack={() => setProfileScreen('main')}
                             onSave={async (data) => {
-                                await courses.saveTutoringPricing(data);
+                                const error = await courses.saveTutoringPricing(data);
+                                if (error) {
+                                    showAlert('Could not save tutor pricing', error);
+                                    return;
+                                }
                                 setTutorPricingSessionType(data.sessionType);
                                 setProfileScreen('main');
                             }}
@@ -821,9 +913,10 @@ export default function App() {
                                 initial: person.name.charAt(0) || '?',
                             }))}
                             onBack={() => setProfileScreen('settings')}
-                            onUnblock={(id) => {
-                                connections.unblock(id);
-                            }}
+                            onUnblock={(id) => connections.unblock(id)}
+                            loading={connections.loading}
+                            error={connections.error}
+                            onRetry={connections.refresh}
                             isDarkMode={theme === 'dark'}
                         />
                     </View>
@@ -871,6 +964,9 @@ export default function App() {
                             }}
                             onViewProfile={(connectionId) => handleViewProfile(connectionId)}
                             onDisconnect={(connectionId, name) => handleDisconnectUser(connectionId, name)}
+                            loading={connections.loading}
+                            error={connections.error}
+                            onRetry={connections.refresh}
                             isDarkMode={theme === 'dark'}
                         />
                     </View>
@@ -901,6 +997,9 @@ export default function App() {
                         handleViewProfile(target);
                     }}
                     onSendMessage={(text) => chat.sendMessage(selectedConversationId, text)}
+                    error={chat.error}
+                    loadingMessages={chat.loadingMessages}
+                    onRetry={() => chat.fetchMessages(selectedConversationId)}
                     isTutorView={false}
                     isDarkMode={theme === 'dark'}
                 />
@@ -919,6 +1018,9 @@ export default function App() {
                         courses={mockCourses}
                         onCoursePress={(code) => setSelectedCourse(code)}
                         onStatusChange={handleStatusChange}
+                        loading={courses.loading}
+                        error={courses.error}
+                        onRetry={courses.refresh}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -937,8 +1039,12 @@ export default function App() {
                         onViewProfile={(profile) => {
                             handleViewProfile(profile.id);
                         }}
-                        loading={classmatesFeed.loading}
-                        error={classmatesFeed.error}
+                        loading={classmatesFeed.loading || connections.loading}
+                        error={classmatesFeed.error ?? connections.error}
+                        onRetry={() => {
+                            classmatesFeed.refresh();
+                            connections.refresh();
+                        }}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -955,6 +1061,9 @@ export default function App() {
                         onDeleteConversation={(conversationId) => {
                             chat.deleteConversation(conversationId);
                         }}
+                        loading={chat.loading}
+                        error={chat.error}
+                        onRetry={chat.refreshConversations}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -963,19 +1072,29 @@ export default function App() {
                 return (
                     <ActivityScreen
                         activities={activities}
-                        onAcceptConnection={(id) => {
+                        onAcceptConnection={async (id) => {
                             const activity = activities.find(a => a.id === id);
                             if (activity?.referenceId) {
-                                connections.acceptRequest(activity.referenceId);
+                                const error = await connections.acceptRequest(activity.referenceId);
+                                if (error) {
+                                    showAlert('Could not accept request', error);
+                                    return;
+                                }
                             }
-                            activityFeed.removeActivity(id);
+                            const error = await activityFeed.removeActivity(id);
+                            if (error) showAlert('Could not clear activity', error);
                         }}
-                        onDeclineConnection={(id) => {
+                        onDeclineConnection={async (id) => {
                             const activity = activities.find(a => a.id === id);
                             if (activity?.referenceId) {
-                                connections.declineRequest(activity.referenceId);
+                                const error = await connections.declineRequest(activity.referenceId);
+                                if (error) {
+                                    showAlert('Could not decline request', error);
+                                    return;
+                                }
                             }
-                            activityFeed.removeActivity(id);
+                            const error = await activityFeed.removeActivity(id);
+                            if (error) showAlert('Could not clear activity', error);
                         }}
                         onActivityTap={(activity) => {
                             activityFeed.markRead(activity.id);
@@ -997,6 +1116,9 @@ export default function App() {
                             activityFeed.markAllRead();
                         }}
                         onViewProfile={(id) => handleViewProfile(id)}
+                        loading={activityFeed.loading}
+                        error={activityFeed.error}
+                        onRetry={activityFeed.refresh}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -1174,7 +1296,15 @@ export default function App() {
                         onComplete={async () => {
                             if (onboardingProfileBasics) {
                                 setAuthLoading(true);
-                                const photoUrl = await saveSignupPhoto(onboardingProfileBasics.profileImage);
+                                let photoUrl: string | null;
+                                try {
+                                    photoUrl = await saveSignupPhoto(onboardingProfileBasics.profileImage);
+                                } catch (error) {
+                                    console.error('Signup avatar upload failed:', error);
+                                    setAuthLoading(false);
+                                    showAlert('Photo upload failed', error instanceof Error ? error.message : 'Please try uploading your photo again.');
+                                    return;
+                                }
                                 const { error } = await auth.createProfile({
                                     name: onboardingProfileBasics.name,
                                     pronouns: onboardingProfileBasics.pronouns,
@@ -1239,7 +1369,15 @@ export default function App() {
                         onComplete={async () => {
                             if (onboardingProfileBasics) {
                                 setAuthLoading(true);
-                                const photoUrl = await saveSignupPhoto(onboardingProfileBasics.profileImage);
+                                let photoUrl: string | null;
+                                try {
+                                    photoUrl = await saveSignupPhoto(onboardingProfileBasics.profileImage);
+                                } catch (error) {
+                                    console.error('Signup avatar upload failed:', error);
+                                    setAuthLoading(false);
+                                    showAlert('Photo upload failed', error instanceof Error ? error.message : 'Please try uploading your photo again.');
+                                    return;
+                                }
                                 const tutorCourseData = (onboardingTutorCourses.length > 0 ? onboardingTutorCourses : onboardingCourses).map((code) => {
                                     const pricing = onboardingTutorPricing?.prices?.[code] || { group: 6, individual: 20 };
                                     return {
@@ -1385,5 +1523,3 @@ export default function App() {
         </ThemeProvider>
     );
 }
-
-

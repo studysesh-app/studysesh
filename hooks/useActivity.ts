@@ -36,6 +36,7 @@ function mapRow(r: any): ActivityItem {
 export function useActivity(userId: string | null) {
     const [activities, setActivities] = useState<ActivityItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
         if (DEMO_MODE || !userId) {
@@ -43,6 +44,7 @@ export function useActivity(userId: string | null) {
             return;
         }
         setLoading(true);
+        setErrorMessage(null);
         const { data, error } = await supabase
             .from('activities')
             .select('id, type, actor_id, reference_id, course_code, is_read, created_at, actor:actor_id(name)')
@@ -51,6 +53,7 @@ export function useActivity(userId: string | null) {
             .limit(100);
         if (error) {
             console.error('Fetch activities error:', error);
+            setErrorMessage(error.message);
             setLoading(false);
             return;
         }
@@ -75,22 +78,50 @@ export function useActivity(userId: string | null) {
         };
     }, [userId, refresh]);
 
-    const markRead = useCallback(async (id: string) => {
+    const markRead = useCallback(async (id: string): Promise<string | null> => {
+        setErrorMessage(null);
+        const previous = activities.find((a) => a.id === id)?.isUnread;
         setActivities((prev) => prev.map((a) => (a.id === id ? { ...a, isUnread: false } : a)));
-        if (!DEMO_MODE) await supabase.from('activities').update({ is_read: true }).eq('id', id);
-    }, []);
-
-    const markAllRead = useCallback(async () => {
-        setActivities((prev) => prev.map((a) => ({ ...a, isUnread: false })));
-        if (!DEMO_MODE && userId) {
-            await supabase.from('activities').update({ is_read: true }).eq('user_id', userId).eq('is_read', false);
+        if (DEMO_MODE) return null;
+        const { error } = await supabase.from('activities').update({ is_read: true }).eq('id', id);
+        if (error) {
+            console.error('Mark activity read error:', error);
+            if (previous) setActivities((prev) => prev.map((a) => (a.id === id ? { ...a, isUnread: true } : a)));
+            setErrorMessage(error.message);
+            return error.message;
         }
-    }, [userId]);
+        return null;
+    }, [activities]);
 
-    const removeActivity = useCallback(async (id: string) => {
+    const markAllRead = useCallback(async (): Promise<string | null> => {
+        setErrorMessage(null);
+        const previous = activities;
+        setActivities((prev) => prev.map((a) => ({ ...a, isUnread: false })));
+        if (DEMO_MODE || !userId) return null;
+        const { error } = await supabase.from('activities').update({ is_read: true }).eq('user_id', userId).eq('is_read', false);
+        if (error) {
+            console.error('Mark all activities read error:', error);
+            setActivities(previous);
+            setErrorMessage(error.message);
+            return error.message;
+        }
+        return null;
+    }, [activities, userId]);
+
+    const removeActivity = useCallback(async (id: string): Promise<string | null> => {
+        setErrorMessage(null);
+        const previous = activities;
         setActivities((prev) => prev.filter((a) => a.id !== id));
-        if (!DEMO_MODE) await supabase.from('activities').delete().eq('id', id);
-    }, []);
+        if (DEMO_MODE) return null;
+        const { error } = await supabase.from('activities').delete().eq('id', id);
+        if (error) {
+            console.error('Delete activity error:', error);
+            setActivities(previous);
+            setErrorMessage(error.message);
+            return error.message;
+        }
+        return null;
+    }, [activities]);
 
-    return { activities, loading, refresh, markRead, markAllRead, removeActivity };
+    return { activities, loading, error: errorMessage, refresh, markRead, markAllRead, removeActivity };
 }

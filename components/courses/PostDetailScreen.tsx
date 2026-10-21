@@ -3,6 +3,7 @@ import { ArrowLeft, Heart, MessageCircle, Send, CircleHelp } from 'lucide-react-
 import { useState, useRef } from 'react';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
+import { showAlert } from '../../lib/alert';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -33,8 +34,10 @@ interface PostDetailScreenProps {
     type: PostType;
     onBack: () => void;
     onLikePost: () => void;
-    onLikeComment: (commentId: string) => void;
-    onAddComment: (content: string, parentId?: string | null) => void;
+    onLikeComment: (commentId: string) => void | Promise<boolean | void>;
+    onAddComment: (content: string, parentId?: string | null) => void | Promise<boolean | void>;
+    commentsError?: string | null;
+    onRetryComments?: () => void;
     onViewProfile?: (tutorId: string) => void;
     isDarkMode?: boolean;
 }
@@ -54,6 +57,8 @@ export function PostDetailScreen({
     onLikePost,
     onLikeComment,
     onAddComment,
+    commentsError = null,
+    onRetryComments,
     onViewProfile,
     isDarkMode = false,
 }: PostDetailScreenProps) {
@@ -92,11 +97,22 @@ export function PostDetailScreen({
         transform: [{ translateX: translateX.value }],
     }));
 
-    const handleSubmitComment = () => {
+    const handleSubmitComment = async () => {
         if (newComment.trim()) {
-            onAddComment(newComment.trim(), replyingTo?.id ?? null);
+            const added = await onAddComment(newComment.trim(), replyingTo?.id ?? null);
+            if (added === false) {
+                showAlert('Comment not sent', 'Check your connection and try again. Your comment is still here.');
+                return;
+            }
             setNewComment('');
             setReplyingTo(null);
+        }
+    };
+
+    const handleLikeComment = async (commentId: string) => {
+        const liked = await onLikeComment(commentId);
+        if (liked === false) {
+            showAlert('Like not saved', 'Check your connection and try again.');
         }
     };
 
@@ -188,7 +204,18 @@ export function PostDetailScreen({
                                 Comments ({comments.length})
                             </Text>
 
-                            {topLevelComments.length === 0 ? (
+                            {commentsError ? (
+                                <View style={{ paddingVertical: 12 }}>
+                                    <Text style={{ color: isDarkMode ? '#fca5a5' : '#b91c1c' }}>
+                                        Couldn't load comments: {commentsError}
+                                    </Text>
+                                    {onRetryComments && (
+                                        <TouchableOpacity onPress={onRetryComments} style={{ paddingVertical: 12 }}>
+                                            <Text style={{ color: '#db2321', fontWeight: '600' }}>Try again</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            ) : topLevelComments.length === 0 ? (
                                 <View style={styles.emptyComments}>
                                     <Text style={styles.emptyText}>No comments yet</Text>
                                     <Text style={styles.emptySubtext}>Be the first to comment!</Text>
@@ -223,7 +250,7 @@ export function PostDetailScreen({
                                                         </TouchableOpacity>
                                                         <TouchableOpacity
                                                             style={styles.commentAction}
-                                                            onPress={() => onLikeComment(comment.id)}
+                                                            onPress={() => handleLikeComment(comment.id)}
                                                         >
                                                             <Heart
                                                                 size={16}
@@ -264,7 +291,7 @@ export function PostDetailScreen({
                                                             </TouchableOpacity>
                                                             <TouchableOpacity
                                                                 style={styles.commentAction}
-                                                                onPress={() => onLikeComment(reply.id)}
+                                                                onPress={() => handleLikeComment(reply.id)}
                                                             >
                                                                 <Heart
                                                                     size={16}

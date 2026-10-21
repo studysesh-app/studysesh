@@ -40,13 +40,20 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
             showAlert('Unsupported File', 'Please select a PDF or an image file.');
             return;
         }
+        if (asset.size != null && asset.size > 10 * 1024 * 1024) {
+            showAlert('File too large', 'Choose a file smaller than 10 MB.');
+            return;
+        }
 
         setUploading(true);
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
-
-            const path = await uploadTutorProof(user.id, selectedCourse, asset.uri);
+            let path = asset.uri;
+            if (!DEMO_MODE) {
+                const { data: { user }, error } = await supabase.auth.getUser();
+                if (error) throw error;
+                if (!user) throw new Error('Not authenticated');
+                path = await uploadTutorProof(user.id, selectedCourse, asset.uri);
+            }
             setUploadedFiles((prev) => [
                 ...prev,
                 {
@@ -58,18 +65,24 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
             ]);
         } catch (e) {
             console.error('Proof upload error:', e);
-            showAlert('Upload Failed', 'Could not upload the file. Please try again.');
+            showAlert('Upload failed', e instanceof Error ? e.message : 'Could not upload the file. Please try again.');
         } finally {
             setUploading(false);
         }
     };
 
-    const removeFile = (index: number) => {
+    const removeFile = async (index: number) => {
         const file = uploadedFiles[index];
-        setUploadedFiles(uploadedFiles.filter((_, i) => i !== index));
-        if (file?.path) {
-            supabase.storage.from('proofs').remove([file.path]).catch(() => {});
+        if (!file) return;
+        if (!DEMO_MODE && file.path) {
+            const { error } = await supabase.storage.from('proofs').remove([file.path]);
+            if (error) {
+                console.error('Remove tutor proof error:', error);
+                showAlert('Could not remove proof', error.message);
+                return;
+            }
         }
+        setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
     };
 
     const handleContinue = () => {

@@ -395,88 +395,31 @@ export function useAuth(): UseAuthReturn {
         return { error: 'Add 3 profile prompts before continuing.' };
       }
 
-      // 1. Insert user profile
-      const { error: profileError } = await supabase.from('users').upsert({
-        id: user.id,
-        email: user.email!,
-        name: profileData.name,
-        pronouns: profileData.pronouns,
-        gender: profileData.gender,
-        year: profileData.year,
-        degree_level: profileData.degreeLevel,
-        major: profileData.major,
-        profile_visibility: profileData.profileVisibility || 'everyone',
-        photo_url: profileData.profileImage || null,
-        is_tutor: profileData.isTutor,
+      const { error: profileError } = await supabase.rpc('complete_profile', {
+        p_profile: {
+          name: profileData.name,
+          pronouns: profileData.pronouns,
+          gender: profileData.gender,
+          year: profileData.year,
+          degree_level: profileData.degreeLevel,
+          major: profileData.major,
+          profile_visibility: profileData.profileVisibility || 'everyone',
+          photo_url: profileData.profileImage || null,
+          is_tutor: profileData.isTutor,
+        },
+        p_prompts: profileData.prompts,
+        p_courses: profileData.courses,
+        p_tutor_courses: profileData.tutorCourses?.map((course) => ({
+          course_code: course.courseCode,
+          group_price: course.groupPrice ?? null,
+          individual_price: course.individualPrice ?? null,
+          proof_url: course.proofUrl ?? null,
+          session_type: course.sessionType ?? 'both',
+        })) ?? [],
       });
-
       if (profileError) {
-        console.error('Profile insert error:', profileError);
+        console.error('Complete profile error:', profileError);
         return { error: profileError.message };
-      }
-
-      // 2. Insert prompts
-      const promptRows = profileData.prompts.map((p, i) => ({
-        user_id: user.id,
-        prompt: p.prompt,
-        answer: p.answer,
-        sort_order: i,
-      }));
-
-      await supabase.from('user_prompts').delete().eq('user_id', user.id);
-      const { error: promptsError } = await supabase.from('user_prompts').insert(promptRows);
-      if (promptsError) return { error: promptsError.message };
-
-      // 3. Enroll in courses (look up course IDs by code)
-      if (profileData.courses.length > 0) {
-        const { data: courseRows } = await supabase
-          .from('courses')
-          .select('id, code')
-          .in('code', profileData.courses);
-
-        const found = new Set((courseRows ?? []).map((c) => c.code));
-        const missing = profileData.courses.filter((code) => !found.has(code));
-        if (missing.length > 0) {
-          return { error: `Couldn't save courses: ${missing.join(', ')}` };
-        }
-
-        const { error: clearError } = await supabase.from('user_courses').delete().eq('user_id', user.id);
-        if (clearError) return { error: clearError.message };
-
-        const { error: enrollError } = await supabase
-          .from('user_courses')
-          .insert(courseRows!.map((c) => ({ user_id: user.id, course_id: c.id })));
-
-        if (enrollError) return { error: enrollError.message };
-      }
-
-      // 4. If tutor, insert tutor courses
-      if (profileData.isTutor && profileData.tutorCourses && profileData.tutorCourses.length > 0) {
-        const tutorCourseCodes = profileData.tutorCourses.map((tc) => tc.courseCode);
-        const { data: tutorCourseRows } = await supabase
-          .from('courses')
-          .select('id, code')
-          .in('code', tutorCourseCodes);
-
-        if (!tutorCourseRows || tutorCourseRows.length !== tutorCourseCodes.length) {
-          const foundCodes = new Set((tutorCourseRows ?? []).map((c) => c.code));
-          const missingCodes = tutorCourseCodes.filter((code) => !foundCodes.has(code));
-          return { error: `Couldn't save tutoring courses: ${missingCodes.join(', ')}` };
-        }
-
-        const codeToId = Object.fromEntries(tutorCourseRows.map((c) => [c.code, c.id]));
-        const { error: tutorError } = await supabase.from('tutor_courses').upsert(
-          profileData.tutorCourses.map((tc) => ({
-            user_id: user.id,
-            course_id: codeToId[tc.courseCode],
-            group_price: tc.groupPrice ?? null,
-            individual_price: tc.individualPrice ?? null,
-            proof_url: tc.proofUrl ?? null,
-            session_type: tc.sessionType ?? 'both',
-            is_approved: true,
-          }))
-        );
-        if (tutorError) return { error: tutorError.message };
       }
 
       // Refresh profile

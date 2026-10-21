@@ -3,6 +3,7 @@ import { useState, useRef } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Carousel, { ICarouselInstance } from 'react-native-reanimated-carousel';
 import { ProfileCard } from './ProfileCard';
+import { showAlert } from '../../lib/alert';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -21,7 +22,7 @@ interface ClassmateProfile {
 interface ClassmatesScreenProps {
     profiles: ClassmateProfile[];
     currentUserGender: 'Man' | 'Woman' | 'Non-Binary' | 'Prefer not to say';
-    onConnect: (profileId: string) => void;
+    onConnect: (profileId: string) => void | Promise<string | null>;
     onViewProfile?: (profile: ClassmateProfile) => void;
     connectedProfiles: Set<string>;
     friends: Set<string>;
@@ -31,6 +32,7 @@ interface ClassmatesScreenProps {
     isDarkMode?: boolean;
     loading?: boolean;
     error?: string | null;
+    onRetry?: () => void;
 }
 
 export function ClassmatesScreen({
@@ -46,6 +48,7 @@ export function ClassmatesScreen({
     isDarkMode = false,
     loading = false,
     error = null,
+    onRetry,
 }: ClassmatesScreenProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const carouselRef = useRef<ICarouselInstance>(null);
@@ -54,11 +57,15 @@ export function ClassmatesScreen({
         onViewProfile?.(profile);
     };
 
-    const handleConnect = (profile: ClassmateProfile) => {
+    const handleConnect = async (profile: ClassmateProfile) => {
         const isAlreadyConnected = connectedProfiles.has(profile.id);
 
         // Notify parent to toggle connection
-        onConnect(profile.id);
+        const error = await onConnect(profile.id);
+        if (error) {
+            showAlert('Connection request failed', error);
+            return;
+        }
 
         // Auto-advance only on connect (not unrequest)
         if (!isAlreadyConnected) {
@@ -87,6 +94,11 @@ export function ClassmatesScreen({
                 <View style={styles.emptyState}>
                     <Text style={[styles.emptyTitle, isDarkMode && styles.emptyTitleDark]}>Couldn't load classmates</Text>
                     <Text style={[styles.emptySubtitle, isDarkMode && styles.emptySubtitleDark]}>{error}</Text>
+                    {onRetry && (
+                        <Text onPress={onRetry} style={{ color: '#db2321', fontWeight: '600', padding: 12 }}>
+                            Try again
+                        </Text>
+                    )}
                 </View>
             </View>
         );

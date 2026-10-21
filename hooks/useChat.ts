@@ -28,6 +28,8 @@ export function useChat(userId: string | null) {
     const [conversations, setConversations] = useState<ChatConversationSummary[]>([]);
     const [messagesByConversation, setMessagesByConversation] = useState<Record<string, ChatMessageItem[]>>({});
     const [loading, setLoading] = useState(true);
+    const [loadingMessages, setLoadingMessages] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     const refreshConversations = useCallback(async () => {
         if (DEMO_MODE || !userId) {
@@ -35,11 +37,18 @@ export function useChat(userId: string | null) {
             return;
         }
         setLoading(true);
+        setError(null);
 
-        const { data: myParticipantRows } = await supabase
+        const { data: myParticipantRows, error: participantsError } = await supabase
             .from('conversation_participants')
             .select('conversation_id')
             .eq('user_id', userId);
+        if (participantsError) {
+            console.error('Fetch conversation list error:', participantsError);
+            setError(participantsError.message);
+            setLoading(false);
+            return;
+        }
         const convIds = (myParticipantRows ?? []).map((r) => r.conversation_id);
         if (convIds.length === 0) {
             setConversations([]);
@@ -47,7 +56,7 @@ export function useChat(userId: string | null) {
             return;
         }
 
-        const [{ data: otherParticipants }, { data: lastMessages }, { data: myParticipantMeta }] = await Promise.all([
+        const [othersResult, messagesResult, metadataResult] = await Promise.all([
             supabase
                 .from('conversation_participants')
                 .select('conversation_id, user_id, users(name, is_tutor)')
@@ -64,6 +73,16 @@ export function useChat(userId: string | null) {
                 .in('conversation_id', convIds)
                 .eq('user_id', userId),
         ]);
+        const queryError = othersResult.error ?? messagesResult.error ?? metadataResult.error;
+        if (queryError) {
+            console.error('Fetch conversation details error:', queryError);
+            setError(queryError.message);
+            setLoading(false);
+            return;
+        }
+        const otherParticipants = othersResult.data;
+        const lastMessages = messagesResult.data;
+        const myParticipantMeta = metadataResult.data;
 
         const otherByConv = new Map(
             (otherParticipants ?? []).map((r: any) => [
@@ -86,8 +105,8 @@ export function useChat(userId: string | null) {
             }
         }
 
-        const summaries = convIds
-            .map((id) => {
+        const summaries: ChatConversationSummary[] = convIds
+            .map((id): ChatConversationSummary & { _sortKey: string } => {
                 const other = otherByConv.get(id);
                 const last = lastByConv.get(id);
                 return {
@@ -114,13 +133,21 @@ export function useChat(userId: string | null) {
     }, [refreshConversations]);
 
     const fetchMessages = useCallback(
-        async (conversationId: string) => {
-            if (DEMO_MODE || !userId) return;
-            const { data } = await supabase
+        async (conversationId: string): Promise<boolean> => {
+            if (DEMO_MODE || !userId) return true;
+            setError(null);
+            setLoadingMessages(true);
+            const { data, error: fetchError } = await supabase
                 .from('messages')
                 .select('id, sender_id, content, status, created_at')
                 .eq('conversation_id', conversationId)
                 .order('created_at', { ascending: true });
+            if (fetchError) {
+                console.error('Fetch messages error:', fetchError);
+                setError(fetchError.message);
+                setLoadingMessages(false);
+                return false;
+            }
 
             const msgs = (data ?? []).map((m: any) => ({
                 id: m.id,
@@ -132,17 +159,27 @@ export function useChat(userId: string | null) {
             }));
             setMessagesByConversation((prev) => ({ ...prev, [conversationId]: msgs }));
 
-            await supabase
+            const { error: deliveryError } = await supabase
                 .from('messages')
                 .update({ status: 'delivered' })
                 .eq('conversation_id', conversationId)
                 .neq('sender_id', userId)
                 .eq('status', 'sent');
-            await supabase
+            if (deliveryError) {
+                console.error('Mark messages delivered error:', deliveryError);
+                setError(deliveryError.message);
+            }
+            const { error: readError } = await supabase
                 .from('conversation_participants')
                 .update({ last_read_at: new Date().toISOString() })
                 .eq('conversation_id', conversationId)
                 .eq('user_id', userId);
+            if (readError) {
+                console.error('Update conversation read time error:', readError);
+                setError(readError.message);
+            }
+            setLoadingMessages(false);
+            return !deliveryError && !readError;
         },
         [userId]
     );
@@ -154,7 +191,16 @@ export function useChat(userId: string | null) {
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
                 const m: any = payload.new;
                 if (m.sender_id !== userId && m.status === 'sent') {
-                    supabase.from('messages').update({ status: 'delivered' }).eq('id', m.id).then(() => {});
+                    supabase
+                        .from('messages')
+                        .update({ status: 'delivered' })
+                        .eq('id', m.id)
+                        .then(({ error }) => {
+                            if (error) {
+                                console.error('Mark incoming message delivered error:', error);
+                                setError(error.message);
+                            }
+                        });
                 }
                 setMessagesByConversation((prev) => {
                     if (!prev[m.conversation_id]) return prev;
@@ -197,16 +243,19 @@ export function useChat(userId: string | null) {
         async (conversationId: string, content: string) => {
             if (DEMO_MODE) return true;
             if (!userId) return false;
+            setError(null);
             const { error } = await supabase
                 .from('messages')
                 .insert({ conversation_id: conversationId, sender_id: userId, content, status: 'sent' });
             if (error) {
                 console.error('Send message error:', error);
+                setError(error.message);
                 return false;
             }
+            let notificationError: string | null = null;
             const other = conversations.find((c) => c.id === conversationId);
             if (other?.otherUserId) {
-                const { data: existing } = await supabase
+                const { data: existing, error: activityLookupError } = await supabase
                     .from('activities')
                     .select('id')
                     .eq('user_id', other.otherUserId)
@@ -214,17 +263,26 @@ export function useChat(userId: string | null) {
                     .eq('reference_id', conversationId)
                     .eq('is_read', false)
                     .maybeSingle();
-                if (!existing) {
-                    await supabase.from('activities').insert({
+                if (activityLookupError) {
+                    console.error('Check message notification error:', activityLookupError);
+                    notificationError = `Your message was sent, but its notification could not be checked: ${activityLookupError.message}`;
+                } else if (!existing) {
+                    const { error: activityError } = await supabase.from('activities').insert({
                         user_id: other.otherUserId,
                         actor_id: userId,
                         type: 'message',
                         reference_id: conversationId,
                     });
+                    if (activityError) {
+                        console.error('Create message notification error:', activityError);
+                        notificationError = `Your message was sent, but its notification failed: ${activityError.message}`;
+                    }
                 }
             }
-            await fetchMessages(conversationId);
+            const messagesLoaded = await fetchMessages(conversationId);
             await refreshConversations();
+            if (notificationError) setError(notificationError);
+            else if (!messagesLoaded) setError('Your message was sent, but the conversation could not be refreshed.');
             return true;
         },
         [userId, fetchMessages, refreshConversations, conversations]
@@ -233,13 +291,20 @@ export function useChat(userId: string | null) {
     const getOrCreateConversation = useCallback(
         async (otherUserId: string): Promise<string | null> => {
             if (DEMO_MODE || !userId) return null;
+            setError(null);
             const { data, error } = await supabase.functions.invoke('create-conversation', { body: { otherUserId } });
             if (error) {
                 console.error('create-conversation error:', error);
+                setError(error.message);
+                return null;
+            }
+            if (!data?.conversationId) {
+                const message = 'The conversation could not be created.';
+                setError(message);
                 return null;
             }
             await refreshConversations();
-            return data?.conversationId ?? null;
+            return data.conversationId;
         },
         [userId, refreshConversations]
     );
@@ -253,9 +318,19 @@ export function useChat(userId: string | null) {
                 return next;
             });
             if (DEMO_MODE || !userId) return;
-            await supabase.from('conversation_participants').delete().eq('conversation_id', conversationId).eq('user_id', userId);
+            setError(null);
+            const { error } = await supabase
+                .from('conversation_participants')
+                .delete()
+                .eq('conversation_id', conversationId)
+                .eq('user_id', userId);
+            if (error) {
+                console.error('Delete conversation error:', error);
+                await refreshConversations();
+                setError(error.message);
+            }
         },
-        [userId]
+        [userId, refreshConversations]
     );
 
     const markConversationRead = useCallback(
@@ -267,15 +342,23 @@ export function useChat(userId: string | null) {
                 .update({ last_read_at: new Date().toISOString() })
                 .eq('conversation_id', conversationId)
                 .eq('user_id', userId)
-                .then(() => {});
+                .then(async ({ error }) => {
+                    if (error) {
+                        console.error('Mark conversation read error:', error);
+                        await refreshConversations();
+                        setError(error.message);
+                    }
+                });
         },
-        [userId]
+        [userId, refreshConversations]
     );
 
     return {
         conversations,
         messagesByConversation,
         loading,
+        loadingMessages,
+        error,
         refreshConversations,
         fetchMessages,
         sendMessage,

@@ -20,6 +20,7 @@ export function useConnections(userId: string | null) {
     const [blocked, setBlocked] = useState<Set<string>>(new Set());
     const [blockedProfiles, setBlockedProfiles] = useState<Array<{ id: string; name: string }>>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
         if (DEMO_MODE || !userId) {
@@ -27,14 +28,24 @@ export function useConnections(userId: string | null) {
             return;
         }
         setLoading(true);
+        setError(null);
 
-        const [{ data: connRows }, { data: blockedRows }] = await Promise.all([
+        const [connectionsResult, blockedResult] = await Promise.all([
             supabase
                 .from('connections')
                 .select('id, requester_id, receiver_id, status, created_at')
                 .or(`requester_id.eq.${userId},receiver_id.eq.${userId}`),
             supabase.from('blocked_users').select('blocked_id').eq('blocker_id', userId),
         ]);
+        const initialError = connectionsResult.error ?? blockedResult.error;
+        if (initialError) {
+            console.error('Fetch connections error:', initialError);
+            setError(initialError.message);
+            setLoading(false);
+            return;
+        }
+        const connRows = connectionsResult.data;
+        const blockedRows = blockedResult.data;
 
         const accepted = (connRows ?? []).filter((c) => c.status === 'accepted');
         const pendingSent = (connRows ?? []).filter((c) => c.status === 'pending' && c.requester_id === userId);
@@ -45,7 +56,13 @@ export function useConnections(userId: string | null) {
         const blockedIds = (blockedRows ?? []).map((b: any) => b.blocked_id as string);
         setBlocked(new Set(blockedIds));
         if (blockedIds.length > 0) {
-            const { data: blockedUsers } = await supabase.from('users').select('id, name').in('id', blockedIds);
+            const { data: blockedUsers, error: blockedUsersError } = await supabase.from('users').select('id, name').in('id', blockedIds);
+            if (blockedUsersError) {
+                console.error('Fetch blocked profiles error:', blockedUsersError);
+                setError(blockedUsersError.message);
+                setLoading(false);
+                return;
+            }
             setBlockedProfiles((prev) =>
                 blockedIds.map((id) => ({
                     id,
@@ -60,11 +77,21 @@ export function useConnections(userId: string | null) {
         }
 
         if (friendIds.length > 0) {
-            const [{ data: users }, { data: myCourseRows }, { data: friendCourseRows }] = await Promise.all([
+            const [usersResult, myCoursesResult, friendCoursesResult] = await Promise.all([
                 supabase.from('users').select('id, name, photo_url, year, major').in('id', friendIds),
                 supabase.from('user_courses').select('course_id').eq('user_id', userId),
                 supabase.from('user_courses').select('user_id, course_id, courses(code)').in('user_id', friendIds),
             ]);
+            const friendError = usersResult.error ?? myCoursesResult.error ?? friendCoursesResult.error;
+            if (friendError) {
+                console.error('Fetch connection profiles error:', friendError);
+                setError(friendError.message);
+                setLoading(false);
+                return;
+            }
+            const users = usersResult.data;
+            const myCourseRows = myCoursesResult.data;
+            const friendCourseRows = friendCoursesResult.data;
 
             const myCourseIds = new Set((myCourseRows ?? []).map((r: any) => r.course_id));
             const sharedByFriend = new Map<string, string[]>();
@@ -106,8 +133,9 @@ export function useConnections(userId: string | null) {
         async (otherUserId: string) => {
             if (DEMO_MODE || !userId) {
                 setSentRequests((prev) => new Set(prev).add(otherUserId));
-                return;
+                return null;
             }
+            setError(null);
             const { data, error } = await supabase
                 .from('connections')
                 .insert({ requester_id: userId, receiver_id: otherUserId, status: 'pending' })
@@ -115,14 +143,24 @@ export function useConnections(userId: string | null) {
                 .single();
             if (error) {
                 console.error('Send connection request error:', error);
-                return;
+                setError(error.message);
+                return error.message;
             }
-            await supabase
+            const { error: activityError } = await supabase
                 .from('activities')
                 .insert({ user_id: otherUserId, actor_id: userId, type: 'connection_request', reference_id: data.id });
+            if (activityError) {
+                console.error('Create connection activity error:', activityError);
+                const { error: rollbackError } = await supabase.from('connections').delete().eq('id', data.id);
+                if (rollbackError) console.error('Rollback connection request error:', rollbackError);
+                await refresh();
+                setError(activityError.message);
+                return activityError.message;
+            }
             setSentRequests((prev) => new Set(prev).add(otherUserId));
+            return null;
         },
-        [userId]
+        [userId, refresh]
     );
 
     const cancelRequest = useCallback(
@@ -132,27 +170,53 @@ export function useConnections(userId: string | null) {
                 next.delete(otherUserId);
                 return next;
             });
-            if (DEMO_MODE || !userId) return;
-            const { data: pending } = await supabase
+            if (DEMO_MODE || !userId) return null;
+            setError(null);
+            const { data: pending, error: lookupError } = await supabase
                 .from('connections')
                 .select('id')
                 .eq('requester_id', userId)
                 .eq('receiver_id', otherUserId)
                 .eq('status', 'pending')
                 .maybeSingle();
-            if (!pending) return;
-            await supabase.from('activities').delete().eq('type', 'connection_request').eq('reference_id', pending.id);
-            await supabase.from('connections').delete().eq('id', pending.id);
+            if (lookupError) {
+                console.error('Find pending connection error:', lookupError);
+                setError(lookupError.message);
+                await refresh();
+                return lookupError.message;
+            }
+            if (!pending) {
+                await refresh();
+                return null;
+            }
+            const { error: deleteError } = await supabase.from('connections').delete().eq('id', pending.id);
+            if (deleteError) {
+                console.error('Cancel connection request error:', deleteError);
+                setError(deleteError.message);
+                await refresh();
+                return deleteError.message;
+            }
+            const { error: activityError } = await supabase
+                .from('activities')
+                .delete()
+                .eq('type', 'connection_request')
+                .eq('reference_id', pending.id);
+            if (activityError) {
+                console.error('Remove canceled connection activity error:', activityError);
+                setError(`The request was canceled, but its notification could not be removed: ${activityError.message}`);
+                return activityError.message;
+            }
+            return null;
         },
-        [userId]
+        [userId, refresh]
     );
 
     const toggleConnect = useCallback(
-        async (otherUserId: string) => {
+        async (otherUserId: string): Promise<string | null> => {
             if (sentRequests.has(otherUserId)) {
-                await cancelRequest(otherUserId);
+                return await cancelRequest(otherUserId);
             } else {
-                await sendRequest(otherUserId);
+                return await sendRequest(otherUserId);
             }
         },
         [sentRequests, sendRequest, cancelRequest]
@@ -160,61 +224,102 @@ export function useConnections(userId: string | null) {
 
     /** Accepts a connection request given the *connection* row id (as referenced by an activity). */
     const acceptRequest = useCallback(
-        async (connectionId: string) => {
-            if (DEMO_MODE || !userId) return;
-            const { data: conn } = await supabase
+        async (connectionId: string): Promise<string | null> => {
+            if (DEMO_MODE || !userId) return null;
+            setError(null);
+            const { data: conn, error: lookupError } = await supabase
                 .from('connections')
                 .select('requester_id, receiver_id')
                 .eq('id', connectionId)
                 .single();
-            if (!conn) return;
+            if (lookupError || !conn) {
+                const message = lookupError?.message ?? 'The connection request could not be found.';
+                console.error('Find connection request error:', lookupError ?? message);
+                setError(message);
+                return message;
+            }
 
-            await supabase.from('connections').update({ status: 'accepted' }).eq('id', connectionId);
-            await supabase
+            const { error: acceptError } = await supabase.from('connections').update({ status: 'accepted' }).eq('id', connectionId);
+            if (acceptError) {
+                console.error('Accept connection request error:', acceptError);
+                setError(acceptError.message);
+                return acceptError.message;
+            }
+            const { error: activityDeleteError } = await supabase
                 .from('activities')
                 .delete()
                 .eq('user_id', userId)
                 .eq('type', 'connection_request')
                 .eq('reference_id', connectionId);
-            await supabase
+            if (activityDeleteError) {
+                console.error('Remove accepted request activity error:', activityDeleteError);
+                setError(`The request was accepted, but its notification could not be cleared: ${activityDeleteError.message}`);
+            }
+            const { error: activityInsertError } = await supabase
                 .from('activities')
                 .insert({ user_id: conn.requester_id, actor_id: userId, type: 'connection_accepted', reference_id: connectionId });
             await refresh();
+            if (activityInsertError) {
+                console.error('Create accepted connection activity error:', activityInsertError);
+                setError(`The request was accepted, but the other person could not be notified: ${activityInsertError.message}`);
+                return activityInsertError.message;
+            }
+            return activityDeleteError?.message ?? null;
         },
         [userId, refresh]
     );
 
-    const declineRequest = useCallback(async (connectionId: string) => {
-        if (DEMO_MODE || !userId) return;
-        await supabase.from('connections').delete().eq('id', connectionId);
-        await supabase
+    const declineRequest = useCallback(async (connectionId: string): Promise<string | null> => {
+        if (DEMO_MODE || !userId) return null;
+        setError(null);
+        const { error: connectionError } = await supabase.from('connections').delete().eq('id', connectionId);
+        if (connectionError) {
+            console.error('Decline connection request error:', connectionError);
+            setError(connectionError.message);
+            return connectionError.message;
+        }
+        const { error: activityError } = await supabase
             .from('activities')
             .delete()
             .eq('user_id', userId)
             .eq('type', 'connection_request')
             .eq('reference_id', connectionId);
+        if (activityError) {
+            console.error('Remove declined connection activity error:', activityError);
+            setError(activityError.message);
+            return activityError.message;
+        }
+        return null;
     }, [userId]);
 
     const disconnect = useCallback(
-        async (otherUserId: string) => {
+        async (otherUserId: string): Promise<string | null> => {
             setFriends((prev) => {
                 const next = new Set(prev);
                 next.delete(otherUserId);
                 return next;
             });
-            if (DEMO_MODE || !userId) return;
-            await supabase
+            if (DEMO_MODE || !userId) return null;
+            setError(null);
+            const { error } = await supabase
                 .from('connections')
                 .delete()
                 .or(
                     `and(requester_id.eq.${userId},receiver_id.eq.${otherUserId}),and(requester_id.eq.${otherUserId},receiver_id.eq.${userId})`
                 );
+            if (error) {
+                console.error('Disconnect user error:', error);
+                setError(error.message);
+                await refresh();
+                return error.message;
+            }
+            return null;
         },
-        [userId]
+        [userId, refresh]
     );
 
     const block = useCallback(
-        async (otherUserId: string, name?: string) => {
+        async (otherUserId: string, name?: string): Promise<string | null> => {
             setBlocked((prev) => new Set(prev).add(otherUserId));
             setBlockedProfiles((prev) => [
                 ...prev.filter((p) => p.id !== otherUserId),
@@ -230,40 +335,69 @@ export function useConnections(userId: string | null) {
                 next.delete(otherUserId);
                 return next;
             });
-            if (DEMO_MODE || !userId) return;
-            await supabase.from('blocked_users').insert({ blocker_id: userId, blocked_id: otherUserId });
-            await supabase
+            if (DEMO_MODE || !userId) return null;
+            setError(null);
+            const { error: blockError } = await supabase.from('blocked_users').insert({ blocker_id: userId, blocked_id: otherUserId });
+            if (blockError) {
+                console.error('Block user error:', blockError);
+                setError(blockError.message);
+                await refresh();
+                return blockError.message;
+            }
+            const { error: connectionError } = await supabase
                 .from('connections')
                 .delete()
                 .or(
                     `and(requester_id.eq.${userId},receiver_id.eq.${otherUserId}),and(requester_id.eq.${otherUserId},receiver_id.eq.${userId})`
                 );
+            if (connectionError) {
+                console.error('Remove connection after block error:', connectionError);
+                setError(`The user was blocked, but the connection could not be removed: ${connectionError.message}`);
+                await refresh();
+                return connectionError.message;
+            }
+            return null;
         },
-        [userId]
+        [userId, refresh]
     );
 
     const unblock = useCallback(
-        async (otherUserId: string) => {
+        async (otherUserId: string): Promise<string | null> => {
             setBlocked((prev) => {
                 const next = new Set(prev);
                 next.delete(otherUserId);
                 return next;
             });
             setBlockedProfiles((prev) => prev.filter((p) => p.id !== otherUserId));
-            if (DEMO_MODE || !userId) return;
-            await supabase.from('blocked_users').delete().eq('blocker_id', userId).eq('blocked_id', otherUserId);
+            if (DEMO_MODE || !userId) return null;
+            setError(null);
+            const { error } = await supabase.from('blocked_users').delete().eq('blocker_id', userId).eq('blocked_id', otherUserId);
+            if (error) {
+                console.error('Unblock user error:', error);
+                setError(error.message);
+                await refresh();
+                return error.message;
+            }
+            return null;
         },
-        [userId]
+        [userId, refresh]
     );
 
     const report = useCallback(
-        async (otherUserId: string, reason?: string) => {
-            if (DEMO_MODE || !userId) return;
-            await supabase.from('reports').insert({
+        async (otherUserId: string, reason?: string): Promise<string | null> => {
+            if (DEMO_MODE || !userId) return null;
+            setError(null);
+            const { error } = await supabase.from('reports').insert({
                 reporter_id: userId,
                 reported_id: otherUserId,
                 reason: reason ?? null,
             });
+            if (error) {
+                console.error('Submit user report error:', error);
+                setError(error.message);
+                return error.message;
+            }
+            return null;
         },
         [userId]
     );
@@ -275,6 +409,7 @@ export function useConnections(userId: string | null) {
         blocked,
         blockedProfiles,
         loading,
+        error,
         refresh,
         toggleConnect,
         sendRequest,

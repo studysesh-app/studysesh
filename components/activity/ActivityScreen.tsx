@@ -10,6 +10,8 @@ interface ActivityItem {
     userInitial: string;
     userPhotoUrl?: string;
     message?: string;
+    userId: string;
+    referenceId: string | null;
     courseName?: string;
     timestamp: string;
     isUnread: boolean;
@@ -24,6 +26,9 @@ interface ActivityScreenProps {
     onMarkAllRead?: () => void;
     onViewProfile?: (studentId: string) => void;
     isDarkMode?: boolean;
+    loading?: boolean;
+    error?: string | null;
+    onRetry?: () => void;
 }
 
 export function ActivityScreen({
@@ -34,6 +39,9 @@ export function ActivityScreen({
     onMarkAllRead,
     onViewProfile,
     isDarkMode = false,
+    loading = false,
+    error = null,
+    onRetry,
 }: ActivityScreenProps) {
     const unreadCount = activities.filter(a => a.isUnread).length;
 
@@ -117,7 +125,21 @@ export function ActivityScreen({
             </View>
 
             <ScrollView style={styles.scrollView} contentContainerStyle={{ paddingBottom: 100 }}>
-                {activities.length === 0 ? (
+                {error ? (
+                    <View style={styles.emptyState}>
+                        <Text style={styles.emptyTitle}>Couldn't load activity</Text>
+                        <Text style={styles.emptySubtitle}>{error}</Text>
+                        {onRetry && (
+                            <TouchableOpacity onPress={onRetry} style={{ padding: 12 }}>
+                                <Text style={styles.markAllRead}>Try again</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                ) : loading && activities.length === 0 ? (
+                    <View style={styles.emptyState}>
+                        <Text style={styles.emptyTitle}>Loading activity...</Text>
+                    </View>
+                ) : activities.length === 0 ? (
                     <View style={styles.emptyState}>
                         <Text style={styles.emptyTitle}>No activity yet</Text>
                         <Text style={styles.emptySubtitle}>

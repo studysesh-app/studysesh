@@ -29,11 +29,25 @@ jobs:
 
       - run: npm ci
 
+      - name: Validate production backend configuration
+        env:
+          EXPO_PUBLIC_DEMO_MODE: ${{ vars.EXPO_PUBLIC_DEMO_MODE }}
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          if [ "$EXPO_PUBLIC_DEMO_MODE" != "false" ]; then
+            echo "Set the EXPO_PUBLIC_DEMO_MODE repository variable to false before deploying."
+            exit 1
+          fi
+          if [ -z "$EXPO_PUBLIC_SUPABASE_URL" ] || [ -z "$EXPO_PUBLIC_SUPABASE_ANON_KEY" ]; then
+            echo "Configure the Supabase URL and anon key repository secrets before deploying."
+            exit 1
+          fi
+
       - name: Export web build
         run: npm run build:web
         env:
-          # Defaults to demo mode until real Supabase secrets are added to the repo.
-          EXPO_PUBLIC_DEMO_MODE: ${{ vars.EXPO_PUBLIC_DEMO_MODE || 'true' }}
+          EXPO_PUBLIC_DEMO_MODE: ${{ vars.EXPO_PUBLIC_DEMO_MODE }}
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
 

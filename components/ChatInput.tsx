@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Send } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { showAlert } from '../lib/alert';
 
 interface ChatInputProps {
     onSend: (message: string) => void | Promise<boolean | void>;
@@ -18,7 +19,11 @@ export function ChatInput({ onSend, placeholder = 'Type a message...', isDarkMod
         const text = message.trim();
         if (!text) return;
         const sent = await onSend(text);
-        if (sent !== false) setMessage('');
+        if (sent === false) {
+            showAlert('Message not sent', 'Check your connection and try again. Your message is still here.');
+            return;
+        }
+        setMessage('');
     };
 
     return (

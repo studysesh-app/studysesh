@@ -28,6 +28,9 @@ interface IndividualChatScreenProps {
     isTutorView?: boolean;
     type?: 'tutor' | 'student';
     isDarkMode?: boolean;
+    error?: string | null;
+    loadingMessages?: boolean;
+    onRetry?: () => void;
 }
 
 export function IndividualChatScreen({
@@ -40,6 +43,9 @@ export function IndividualChatScreen({
     isTutorView,
     type = 'tutor',
     isDarkMode = false,
+    error = null,
+    loadingMessages = false,
+    onRetry,
 }: IndividualChatScreenProps) {
     const isTutor = type === 'tutor';
     const scrollViewRef = useRef<ScrollView>(null);
@@ -189,7 +195,21 @@ export function IndividualChatScreen({
                                 paddingBottom: 10 // Reduced padding below last message
                             }}
                         >
-                            {messages.length === 0 ? (
+                            {error ? (
+                                <View style={{ padding: 12, marginBottom: 12, borderRadius: 8, backgroundColor: isDarkMode ? '#3f1d1d' : '#fef2f2' }}>
+                                    <Text style={{ color: isDarkMode ? '#fecaca' : '#991b1b' }}>{error}</Text>
+                                    {onRetry && (
+                                        <TouchableOpacity onPress={onRetry} style={{ paddingTop: 8 }}>
+                                            <Text style={{ color: '#db2321', fontWeight: '600' }}>Try again</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            ) : null}
+                            {loadingMessages && messages.length === 0 ? (
+                                <View className="items-center justify-center py-12">
+                                    <Text className="text-sm text-gray-500 text-center">Loading messages...</Text>
+                                </View>
+                            ) : messages.length === 0 ? (
                                 <View className="items-center justify-center py-12">
                                     <View className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 items-center justify-center mb-3">
                                         <User size={28} color="#9ca3af" />

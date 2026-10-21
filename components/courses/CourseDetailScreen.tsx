@@ -6,6 +6,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 import { TutorCard } from '../TutorCard';
 import { AnimatedTabs, TabData } from '../../reference/AnimatedTabs';
+import { showAlert } from '../../lib/alert';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -47,6 +48,12 @@ interface CourseDetailScreenProps {
     onMessageTutor: (tutorId: string) => void;
     onViewProfile?: (tutorId: string) => void;
     isDarkMode?: boolean;
+    postsLoading?: boolean;
+    postsError?: string | null;
+    onRetryPosts?: () => void;
+    tutorsLoading?: boolean;
+    tutorsError?: string | null;
+    onRetryTutors?: () => void;
 }
 
 export function CourseDetailScreen({
@@ -62,6 +69,12 @@ export function CourseDetailScreen({
     onMessageTutor,
     onViewProfile,
     isDarkMode = false,
+    postsLoading = false,
+    postsError = null,
+    onRetryPosts,
+    tutorsLoading = false,
+    tutorsError = null,
+    onRetryTutors,
 }: CourseDetailScreenProps) {
     const [activeTabIndex, setActiveTabIndex] = useState(0);
     const [newPostContent, setNewPostContent] = useState('');
@@ -143,7 +156,10 @@ export function CourseDetailScreen({
     const handleSubmitPost = async () => {
         if (!newPostContent.trim()) return;
         const posted = await onCreatePost(newPostContent.trim(), isQuestion ? 'question' : 'post');
-        if (posted === false) return;
+        if (posted === false) {
+            showAlert('Post not created', 'Check your connection and try again. Your post is still here.');
+            return;
+        }
         setNewPostContent('');
         setIsQuestion(false);
     };
@@ -156,6 +172,27 @@ export function CourseDetailScreen({
 
     const renderBoardContent = () => (
         <View>
+            {postsError ? (
+                <View style={{ padding: 16, alignItems: 'center' }}>
+                    <Text style={{ color: isDarkMode ? '#fca5a5' : '#b91c1c', textAlign: 'center' }}>
+                        Couldn't load posts: {postsError}
+                    </Text>
+                    {onRetryPosts && (
+                        <TouchableOpacity onPress={onRetryPosts} style={{ padding: 12 }}>
+                            <Text style={{ color: '#db2321', fontWeight: '600' }}>Try again</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            ) : postsLoading ? (
+                <Text style={{ color: isDarkMode ? '#d1d5db' : '#6b7280', padding: 16, textAlign: 'center' }}>
+                    Loading posts...
+                </Text>
+            ) : posts.length === 0 ? (
+                <Text style={{ color: isDarkMode ? '#9ca3af' : '#6b7280', padding: 16, textAlign: 'center' }}>
+                    No posts yet. Start the discussion.
+                </Text>
+            ) : null}
+
             {/* Composer */}
             <View style={[styles.composer, isDarkMode && styles.composerDark]}>
                 <TextInput
@@ -294,7 +331,22 @@ export function CourseDetailScreen({
 
     const renderTutorsContent = () => (
         <View>
-            {tutors.length === 0 ? (
+            {tutorsError ? (
+                <View style={{ padding: 16, alignItems: 'center' }}>
+                    <Text style={{ color: isDarkMode ? '#fca5a5' : '#b91c1c', textAlign: 'center' }}>
+                        Couldn't load tutors: {tutorsError}
+                    </Text>
+                    {onRetryTutors && (
+                        <TouchableOpacity onPress={onRetryTutors} style={{ padding: 12 }}>
+                            <Text style={{ color: '#db2321', fontWeight: '600' }}>Try again</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            ) : tutorsLoading && tutors.length === 0 ? (
+                <Text style={{ color: isDarkMode ? '#9ca3af' : '#6b7280', padding: 16, textAlign: 'center' }}>
+                    Loading tutors...
+                </Text>
+            ) : tutors.length === 0 ? (
                 <View style={styles.emptyState}>
                     <Text style={{ fontSize: 48 }}>👨‍🏫</Text>
                     <Text style={[styles.emptyTitle, isDarkMode && styles.textDark]}>No tutors yet</Text>

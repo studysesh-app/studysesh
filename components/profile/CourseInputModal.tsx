@@ -30,6 +30,8 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
     const [results, setResults] = useState<CourseResult[]>([]);
     const [selectedCourse, setSelectedCourse] = useState<CourseResult | null>(null);
     const [searching, setSearching] = useState(false);
+    const [searchError, setSearchError] = useState<string | null>(null);
+    const [retrySearch, setRetrySearch] = useState(0);
     const [proofUploaded, setProofUploaded] = useState(false);
 
     // Also keep manual input as fallback
@@ -41,9 +43,12 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
     useEffect(() => {
         if (searchQuery.length < 2) {
             setResults([]);
+            setSearchError(null);
             return;
         }
 
+        let active = true;
+        setSearchError(null);
         const timer = setTimeout(async () => {
             setSearching(true);
             const q = searchQuery.trim();
@@ -54,21 +59,36 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
                 return;
             }
 
-            const { data, error } = await supabase
-                .from('courses')
-                .select('id, code, name')
-                .or(`code.ilike.%${q}%,name.ilike.%${q}%`)
-                .limit(20)
-                .order('code');
-
-            if (!error && data) {
-                setResults(data);
+            try {
+                const { data, error } = await supabase
+                    .from('courses')
+                    .select('id, code, name')
+                    .or(`code.ilike.%${q}%,name.ilike.%${q}%`)
+                    .limit(20)
+                    .order('code');
+                if (!active) return;
+                if (error) {
+                    console.error('Search courses error:', error);
+                    setSearchError(error.message);
+                    setResults([]);
+                } else {
+                    setResults(data ?? []);
+                }
+            } catch (error) {
+                if (!active) return;
+                console.error('Search courses failed:', error);
+                setSearchError(error instanceof Error ? error.message : 'Could not search courses.');
+                setResults([]);
+            } finally {
+                if (active) setSearching(false);
             }
-            setSearching(false);
         }, 300); // debounce
 
-        return () => clearTimeout(timer);
-    }, [searchQuery]);
+        return () => {
+            active = false;
+            clearTimeout(timer);
+        };
+    }, [searchQuery, retrySearch]);
 
     const handlePrefixChange = (value: string) => {
         const letters = value.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 4);
@@ -180,6 +200,16 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
                             <ActivityIndicator size="small" color="#db2321" />
                         </View>
                     )}
+                    {searchError ? (
+                        <View className="items-center py-3">
+                            <Text className="text-sm text-red-600 text-center">{searchError}</Text>
+                            <TouchableOpacity onPress={() => setRetrySearch((retry) => retry + 1)} className="p-3">
+                                <Text className="font-semibold text-red-600">Try again</Text>
+                            </TouchableOpacity>
+                        </View>
+                    ) : searchQuery.trim().length >= 2 && !searching && results.length === 0 && !selectedCourse ? (
+                        <Text className="py-3 text-center text-sm text-gray-500">No matching courses found.</Text>
+                    ) : null}
                     {results.length > 0 && !selectedCourse && (
                         <View className={`mb-4 max-h-40 border rounded-xl overflow-hidden ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
                             <FlatList

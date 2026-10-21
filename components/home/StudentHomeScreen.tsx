@@ -18,6 +18,9 @@ interface StudentHomeScreenProps {
     onCoursePress: (courseCode: string) => void;
     onStatusChange?: (status: string) => void;
     isDarkMode?: boolean;
+    loading?: boolean;
+    error?: string | null;
+    onRetry?: () => void;
 }
 
 export function StudentHomeScreen({
@@ -27,6 +30,9 @@ export function StudentHomeScreen({
     onCoursePress,
     onStatusChange,
     isDarkMode = false,
+    loading = false,
+    error = null,
+    onRetry,
 }: StudentHomeScreenProps) {
     const [isEditingStatus, setIsEditingStatus] = useState(false);
     const [statusText, setStatusText] = useState(userStatus);
@@ -109,6 +115,27 @@ export function StudentHomeScreen({
                         <Text style={[styles.sectionTitle, isDarkMode && styles.textDark]}>My Courses</Text>
                         <Text style={[styles.courseCount, isDarkMode && styles.textGrayDark]}>{courses.length} courses</Text>
                     </View>
+
+                    {error ? (
+                        <View style={{ alignItems: 'center', padding: 16 }}>
+                            <Text style={{ color: isDarkMode ? '#fca5a5' : '#b91c1c', textAlign: 'center' }}>
+                                Couldn't load your courses: {error}
+                            </Text>
+                            {onRetry && (
+                                <TouchableOpacity onPress={onRetry} style={{ padding: 12 }}>
+                                    <Text style={{ color: '#db2321', fontWeight: '600' }}>Try again</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    ) : loading && courses.length === 0 ? (
+                        <Text style={{ color: isDarkMode ? '#9ca3af' : '#6b7280', padding: 16, textAlign: 'center' }}>
+                            Loading courses...
+                        </Text>
+                    ) : courses.length === 0 ? (
+                        <Text style={{ color: isDarkMode ? '#9ca3af' : '#6b7280', padding: 16, textAlign: 'center' }}>
+                            No courses yet. Add courses from your profile.
+                        </Text>
+                    ) : null}
 
                     <View style={styles.coursesList}>
                         {courses.map((course) => (

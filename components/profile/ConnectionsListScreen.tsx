@@ -23,6 +23,9 @@ interface ConnectionsListScreenProps {
     onViewProfile: (connectionId: string) => void;
     onDisconnect: (connectionId: string, name: string) => void;
     isDarkMode?: boolean;
+    loading?: boolean;
+    error?: string | null;
+    onRetry?: () => void;
 }
 
 export function ConnectionsListScreen({
@@ -32,6 +35,9 @@ export function ConnectionsListScreen({
     onViewProfile,
     onDisconnect,
     isDarkMode = false,
+    loading = false,
+    error = null,
+    onRetry,
 }: ConnectionsListScreenProps) {
     // Swipe gesture for back navigation
     const translateX = useSharedValue(0);
@@ -84,7 +90,21 @@ export function ConnectionsListScreen({
                 </View>
 
                 <ScrollView style={styles.scrollView} contentContainerStyle={{ paddingBottom: 100 }}>
-                    {connections.length === 0 ? (
+                    {error ? (
+                        <View style={styles.emptyState}>
+                            <Text style={[styles.emptyTitle, isDarkMode && styles.textDark]}>Couldn't load connections</Text>
+                            <Text style={styles.emptySubtitle}>{error}</Text>
+                            {onRetry && (
+                                <TouchableOpacity onPress={onRetry} style={{ padding: 12 }}>
+                                    <Text style={{ color: '#db2321', fontWeight: '600' }}>Try again</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    ) : loading && connections.length === 0 ? (
+                        <View style={styles.emptyState}>
+                            <Text style={[styles.emptyTitle, isDarkMode && styles.textDark]}>Loading connections...</Text>
+                        </View>
+                    ) : connections.length === 0 ? (
                         <View style={styles.emptyState}>
                             <Text style={[styles.emptyTitle, isDarkMode && styles.textDark]}>No connections yet</Text>
                             <Text style={styles.emptySubtitle}>

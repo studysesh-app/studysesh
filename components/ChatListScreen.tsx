@@ -19,9 +19,21 @@ interface ChatListScreenProps {
     onDeleteConversation?: (conversationId: string) => void;
     isDarkMode?: boolean;
     isTutor?: boolean; // Add isTutor prop
+    loading?: boolean;
+    error?: string | null;
+    onRetry?: () => void;
 }
 
-export function ChatListScreen({ conversations, onConversationClick, onDeleteConversation, isDarkMode = false, isTutor = false }: ChatListScreenProps) {
+export function ChatListScreen({
+    conversations,
+    onConversationClick,
+    onDeleteConversation,
+    isDarkMode = false,
+    isTutor = false,
+    loading = false,
+    error = null,
+    onRetry,
+}: ChatListScreenProps) {
     const [filterActive, setFilterActive] = useState(false);
 
     // For students: filter to show only tutors when active
@@ -54,7 +66,25 @@ export function ChatListScreen({ conversations, onConversationClick, onDeleteCon
                 contentContainerStyle={{ paddingBottom: 100, flexGrow: 1, paddingHorizontal: 16, paddingTop: 16 }}
             >
 
-                {filteredConversations.length === 0 ? (
+                {error ? (
+                    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '600', color: isDarkMode ? '#fff' : '#111827', marginBottom: 8 }}>
+                            Couldn't load messages
+                        </Text>
+                        <Text style={{ fontSize: 14, color: '#6b7280', textAlign: 'center' }}>{error}</Text>
+                        {onRetry && (
+                            <TouchableOpacity onPress={onRetry} style={{ padding: 12 }}>
+                                <Text style={{ color: '#db2321', fontWeight: '600' }}>Try again</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                ) : loading && filteredConversations.length === 0 ? (
+                    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '600', color: isDarkMode ? '#fff' : '#111827' }}>
+                            Loading messages...
+                        </Text>
+                    </View>
+                ) : filteredConversations.length === 0 ? (
                     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
                         <View style={{ width: 96, height: 96, borderRadius: 48, backgroundColor: isDarkMode ? '#1f2937' : '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
                             <MessageSquare size={40} color="#9ca3af" />

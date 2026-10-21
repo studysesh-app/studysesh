@@ -6,6 +6,7 @@ import { CourseInputModal, ProofFile } from './CourseInputModal';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 import { AnimatedTabs, TabData } from '../../reference/AnimatedTabs';
+import { showAlert } from '../../lib/alert';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -14,8 +15,8 @@ interface MyCoursesScreenProps {
     tutoringCourses?: string[]; // Courses they are tutoring
     isTutor: boolean;
     onBack: () => void;
-    onSave: (courses: string[]) => void;
-    onSaveTutoring?: (courses: string[], proofUris?: Record<string, string>) => void;
+    onSave: (courses: string[]) => void | Promise<string | null>;
+    onSaveTutoring?: (courses: string[], proofUris?: Record<string, string>) => void | Promise<string | null>;
     isDarkMode?: boolean;
 }
 
@@ -64,15 +65,23 @@ export function MyCoursesScreen({
         }
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         // Save both or just the relevant one? 
         // Simpler to just trigger callbacks for both if they changed, or just call onSave for studying and onSaveTutoring for tutoring
         // But the "Save" button usually implies saving the whole screen state.
 
         // We'll call both available callbacks with current state
-        onSave(coursesStudying);
+        const studyingError = await onSave(coursesStudying);
+        if (studyingError) {
+            showAlert('Could not save courses', studyingError);
+            return;
+        }
         if (onSaveTutoring) {
-            onSaveTutoring(coursesTutoring, proofUris);
+            const tutoringError = await onSaveTutoring(coursesTutoring, proofUris);
+            if (tutoringError) {
+                showAlert('Could not save tutoring courses', tutoringError);
+                return;
+            }
         }
 
         onBack(); // Or just give feedback? Usually save closes the screen.

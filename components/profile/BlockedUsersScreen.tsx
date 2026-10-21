@@ -3,6 +3,7 @@ import { ArrowLeft, UserX, ShieldOff } from 'lucide-react-native';
 import { useState } from 'react';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
+import { showAlert } from '../../lib/alert';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -15,8 +16,11 @@ interface BlockedUser {
 interface BlockedUsersScreenProps {
     blockedUsers: BlockedUser[];
     onBack: () => void;
-    onUnblock: (userId: string) => void;
+    onUnblock: (userId: string) => void | Promise<string | null>;
     isDarkMode?: boolean;
+    loading?: boolean;
+    error?: string | null;
+    onRetry?: () => void;
 }
 
 export function BlockedUsersScreen({
@@ -24,12 +28,19 @@ export function BlockedUsersScreen({
     onBack,
     onUnblock,
     isDarkMode = false,
+    loading = false,
+    error = null,
+    onRetry,
 }: BlockedUsersScreenProps) {
     const [blockedUsers, setBlockedUsers] = useState(initialBlockedUsers);
 
-    const handleUnblock = (userId: string) => {
+    const handleUnblock = async (userId: string) => {
+        const error = await onUnblock(userId);
+        if (error) {
+            showAlert('Could not unblock user', error);
+            return;
+        }
         setBlockedUsers(blockedUsers.filter((u) => u.id !== userId));
-        onUnblock(userId);
     };
 
     // Swipe gesture handler
@@ -75,7 +86,21 @@ export function BlockedUsersScreen({
                             </Text>
                         </View>
 
-                        {blockedUsers.length === 0 ? (
+                        {error ? (
+                            <View style={styles.emptyState}>
+                                <Text style={[styles.emptyTitle, isDarkMode && styles.textDark]}>Couldn't load blocked users</Text>
+                                <Text style={styles.emptySubtitle}>{error}</Text>
+                                {onRetry && (
+                                    <TouchableOpacity onPress={onRetry} style={{ padding: 12 }}>
+                                        <Text style={{ color: '#db2321', fontWeight: '600' }}>Try again</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        ) : loading && blockedUsers.length === 0 ? (
+                            <View style={styles.emptyState}>
+                                <Text style={[styles.emptyTitle, isDarkMode && styles.textDark]}>Loading blocked users...</Text>
+                            </View>
+                        ) : blockedUsers.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <View style={[styles.emptyIcon, isDarkMode && styles.emptyIconDark]}>
                                     <UserX size={32} color="#9ca3af" />
