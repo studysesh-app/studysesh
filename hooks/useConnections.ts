@@ -17,6 +17,7 @@ export function useConnections(userId: string | null) {
     const [friends, setFriends] = useState<Set<string>>(new Set());
     const [friendProfiles, setFriendProfiles] = useState<ConnectionProfile[]>([]);
     const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
+    const [sentRequestProfiles, setSentRequestProfiles] = useState<Array<{ id: string; name: string }>>([]);
     const [blocked, setBlocked] = useState<Set<string>>(new Set());
     const [blockedProfiles, setBlockedProfiles] = useState<Array<{ id: string; name: string }>>([]);
     const [loading, setLoading] = useState(true);
@@ -53,6 +54,22 @@ export function useConnections(userId: string | null) {
 
         setFriends(new Set(friendIds));
         setSentRequests(new Set(pendingSent.map((c) => c.receiver_id)));
+        if (pendingSent.length > 0) {
+            const { data: recipients, error: recipientsError } = await supabase
+                .from('users').select('id, name').in('id', pendingSent.map((c) => c.receiver_id));
+            if (recipientsError) {
+                console.error('Fetch pending request profiles error:', recipientsError);
+                setError(recipientsError.message);
+                setLoading(false);
+                return;
+            }
+            setSentRequestProfiles(pendingSent.map((request) => ({
+                id: request.receiver_id,
+                name: recipients?.find((person) => person.id === request.receiver_id)?.name ?? 'Unavailable user',
+            })));
+        } else {
+            setSentRequestProfiles([]);
+        }
         const blockedIds = (blockedRows ?? []).map((b: any) => b.blocked_id as string);
         setBlocked(new Set(blockedIds));
         if (blockedIds.length > 0) {
@@ -133,6 +150,7 @@ export function useConnections(userId: string | null) {
         async (otherUserId: string) => {
             if (DEMO_MODE || !userId) {
                 setSentRequests((prev) => new Set(prev).add(otherUserId));
+                await refresh();
                 return null;
             }
             setError(null);
@@ -203,9 +221,11 @@ export function useConnections(userId: string | null) {
                 .eq('reference_id', pending.id);
             if (activityError) {
                 console.error('Remove canceled connection activity error:', activityError);
+                await refresh();
                 setError(`The request was canceled, but its notification could not be removed: ${activityError.message}`);
-                return activityError.message;
+                return `The request was canceled, but its notification could not be removed: ${activityError.message}`;
             }
+            await refresh();
             return null;
         },
         [userId, refresh]
@@ -406,6 +426,7 @@ export function useConnections(userId: string | null) {
         friends,
         friendProfiles,
         sentRequests,
+        sentRequestProfiles,
         blocked,
         blockedProfiles,
         loading,

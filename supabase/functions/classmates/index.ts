@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const [{ data: me }, { data: blockedRows }, { data: connectionRows }, { data: sharedRows }, { data: courseRows }] =
+    const [meResult, blockedResult, connectionsResult, sharedResult, courseResult] =
       await Promise.all([
         admin.from("users").select("gender").eq("id", user.id).single(),
         admin.from("blocked_users").select("blocker_id, blocked_id").or(`blocker_id.eq.${user.id},blocked_id.eq.${user.id}`),
@@ -59,6 +59,14 @@ Deno.serve(async (req) => {
         admin.from("user_courses").select("user_id, course_id").in("course_id", courseIds),
         admin.from("courses").select("id, code").in("id", courseIds),
       ]);
+    for (const result of [meResult, blockedResult, connectionsResult, sharedResult, courseResult]) {
+      if (result.error) throw result.error;
+    }
+    const me = meResult.data;
+    const blockedRows = blockedResult.data;
+    const connectionRows = connectionsResult.data;
+    const sharedRows = sharedResult.data;
+    const courseRows = courseResult.data;
 
     const blockedIds = new Set(
       (blockedRows ?? []).map((b) => (b.blocker_id === user.id ? b.blocked_id : b.blocker_id)),
@@ -87,7 +95,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const [{ data: users, error: usersError }, { data: promptRows }] = await Promise.all([
+    const [{ data: users, error: usersError }, { data: promptRows, error: promptsError }] = await Promise.all([
       admin
         .from("users")
         .select("id, name, pronouns, gender, year, major, photo_url, bio, profile_visibility")
@@ -99,6 +107,7 @@ Deno.serve(async (req) => {
         .order("sort_order"),
     ]);
     if (usersError) throw usersError;
+    if (promptsError) throw promptsError;
 
     const promptsByUser = new Map<string, Array<{ prompt: string; answer: string }>>();
     for (const row of promptRows ?? []) {
@@ -130,6 +139,7 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
+    console.error("Classmates discovery failed:", error);
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

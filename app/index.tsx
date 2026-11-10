@@ -363,6 +363,10 @@ export default function App() {
     // Profile screen state and user data
     const [profileScreen, setProfileScreen] = useState<ProfileScreen>('main');
 
+    useEffect(() => {
+        if (profileScreen === 'connections') connections.refresh();
+    }, [profileScreen, connections.refresh]);
+
     const myStudyingCourses = courses.studyingCourses;
     const myTutoringCourses = courses.tutoringCourses;
     const [tutorPricingSessionType, setTutorPricingSessionType] = useState<'online' | 'in-person' | 'both'>('both');
@@ -743,7 +747,6 @@ export default function App() {
                         <SettingsScreen
                             {...commonProps}
                             email={auth.profile?.email ?? ''}
-                            isTutor={userRole === 'tutor'}
                             theme={theme}
                             onChangePassword={() => setProfileScreen('change-password')}
                             onChangeEmail={() => setProfileScreen('change-email')}
@@ -753,7 +756,6 @@ export default function App() {
                             onTermsOfService={() => setProfileScreen('terms-of-service')}
                             onThemeChange={handleThemeChange}
                             onLogout={handleLogout}
-                            onNavigate={(screen) => console.log('Navigate to', screen)}
                         />
                     </View>
                 )}
@@ -824,14 +826,14 @@ export default function App() {
                     <View style={overlayStyle}>
                         <PricingEditorScreen
                             courses={myTutoringCourses}
-                            initialGroupPrice={courses.tutorPricing[0]?.groupPrice ?? 20}
-                            initialIndividualPrice={courses.tutorPricing[0]?.individualPrice ?? 40}
+                            initialGroupPrice={courses.tutorPricing[0]?.groupPrice ?? 6}
+                            initialIndividualPrice={courses.tutorPricing[0]?.individualPrice ?? 20}
                             initialPerCoursePricing={Object.fromEntries(
                                 courses.tutorPricing.map((p) => [
                                     p.code,
                                     {
-                                        group: p.groupPrice ?? 20,
-                                        individual: p.individualPrice ?? 40,
+                                        group: p.groupPrice ?? 6,
+                                        individual: p.individualPrice ?? 20,
                                     },
                                 ])
                             )}
@@ -855,7 +857,6 @@ export default function App() {
                         <SettingsScreen
                             {...commonProps}
                             email={auth.profile?.email ?? ''}
-                            isTutor={userRole === 'tutor'}
                             theme={theme}
                             onChangePassword={() => setProfileScreen('change-password')}
                             onChangeEmail={() => setProfileScreen('change-email')}
@@ -865,7 +866,6 @@ export default function App() {
                             onTermsOfService={() => setProfileScreen('terms-of-service')}
                             onThemeChange={handleThemeChange}
                             onLogout={handleLogout}
-                            onNavigate={(screen) => console.log('Navigate to', screen)}
                         />
                     </View>
                 )}
@@ -941,6 +941,12 @@ export default function App() {
                     <View style={overlayStyle}>
                         <ConnectionsListScreen
                             connections={connections.friendProfiles}
+                            sentRequests={Array.from(connections.sentRequests, (id) => ({
+                                id,
+                                name: connections.sentRequestProfiles.find((person) => person.id === id)?.name
+                                    ?? mockClassmates.find((person) => person.id === id)?.name
+                                    ?? 'Unavailable user',
+                            }))}
                             onBack={() => setProfileScreen('main')}
                             onMessage={async (connectionId) => {
                                 // Switch to chat tab based on user role
@@ -964,6 +970,13 @@ export default function App() {
                             }}
                             onViewProfile={(connectionId) => handleViewProfile(connectionId)}
                             onDisconnect={(connectionId, name) => handleDisconnectUser(connectionId, name)}
+                            onCancelRequest={async (id) => {
+                                const error = await connections.cancelRequest(id);
+                                if (error) {
+                                    showAlert('Could not cancel request', error);
+                                }
+                                await classmatesFeed.refresh();
+                            }}
                             loading={connections.loading}
                             error={connections.error}
                             onRetry={connections.refresh}

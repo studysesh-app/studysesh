@@ -1,6 +1,5 @@
 import { View, Text, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
 import { ArrowLeft, ChevronRight } from 'lucide-react-native';
-import { useState } from 'react';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 import { showConfirm } from '../../lib/alert';
@@ -8,48 +7,8 @@ import { openSupportEmail } from '../../lib/support';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
-function BrandSwitch({
-    value,
-    onValueChange,
-    isDark,
-}: {
-    value: boolean;
-    onValueChange: (next: boolean) => void;
-    isDark: boolean;
-}) {
-    return (
-        <TouchableOpacity
-            onPress={() => onValueChange(!value)}
-            activeOpacity={0.85}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: value }}
-            style={{
-                width: 52,
-                height: 32,
-                borderRadius: 16,
-                padding: 3,
-                justifyContent: 'center',
-                backgroundColor: value ? '#ffffff' : (isDark ? '#374151' : '#e5e7eb'),
-                borderWidth: 2,
-                borderColor: '#db2321',
-            }}
-        >
-            <View
-                style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 11,
-                    backgroundColor: value ? '#db2321' : (isDark ? '#9ca3af' : '#ffffff'),
-                    alignSelf: value ? 'flex-end' : 'flex-start',
-                }}
-            />
-        </TouchableOpacity>
-    );
-}
-
 interface SettingsScreenProps {
     email: string;
-    isTutor: boolean;
     theme: 'light' | 'dark';
     onBack: () => void;
     onChangePassword: () => void;
@@ -60,12 +19,10 @@ interface SettingsScreenProps {
     onTermsOfService: () => void;
     onThemeChange: (theme: 'light' | 'dark') => void;
     onLogout: () => void;
-    onNavigate: (screen: any) => void;
 }
 
 export function SettingsScreen({
     email,
-    isTutor,
     theme,
     onBack,
     onChangePassword,
@@ -77,8 +34,6 @@ export function SettingsScreen({
     onThemeChange,
     onLogout,
 }: SettingsScreenProps) {
-    const [messageNotifs, setMessageNotifs] = useState(true);
-
     // Swipe gesture handler
     const translateX = useSharedValue(0);
 
@@ -195,16 +150,9 @@ export function SettingsScreen({
                                     <Text className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'} mb-1`}>
                                         Notifications
                                     </Text>
-                                    <View className="flex-row items-center justify-between">
-                                        <Text className={`text-sm ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
-                                            Message notifications
-                                        </Text>
-                                        <BrandSwitch
-                                            value={messageNotifs}
-                                            onValueChange={setMessageNotifs}
-                                            isDark={theme === 'dark'}
-                                        />
-                                    </View>
+                                    <Text className="text-sm text-gray-500">
+                                        Push notifications are not available yet. Check Activity and Messages for updates.
+                                    </Text>
                                 </View>
                             </View>
                         </View>

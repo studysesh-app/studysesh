@@ -86,8 +86,7 @@ export function TutorHomeScreen({
             <View style={styles.statsRow}>
                 {/* Active */}
                 <View style={styles.statItem}>
-                    <View style={styles.activeDot} />
-                    <Text style={[styles.statText, isDarkMode && styles.textGrayDark]}>{course.activeCount} active</Text>
+                    <Text style={[styles.statText, isDarkMode && styles.textGrayDark]}>{course.activeCount} posts</Text>
                 </View>
 
                 {/* Students */}

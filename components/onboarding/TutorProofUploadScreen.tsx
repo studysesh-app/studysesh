@@ -27,6 +27,10 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
     const [uploading, setUploading] = useState(false);
 
     const handleFileUpload = async () => {
+        if (uploadedFiles.some((file) => file.course === selectedCourse)) {
+            showAlert('Proof already uploaded', 'Remove the existing file before uploading another for this course.');
+            return;
+        }
         const result = await DocumentPicker.getDocumentAsync({
             type: ['application/pdf', 'image/*'],
             copyToCacheDirectory: true,
@@ -125,6 +129,9 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
 
                 <Text className="text-base text-center text-gray-500 mb-6">
                     Upload proof of your success in each course
+                </Text>
+                <Text className="text-sm text-center text-gray-500 mb-6">
+                    Listings are approved automatically after upload. Proof may be reviewed by an administrator.
                 </Text>
 
                 {/* Info Message */}
@@ -245,8 +252,8 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
             <View className="p-4 border-t border-gray-200 dark:border-gray-800">
                 <TouchableOpacity
                     onPress={handleContinue}
-                    disabled={!DEMO_MODE && !allCoursesHaveProof}
-                    className={`w-full py-4 rounded-full shadow-sm ${DEMO_MODE || allCoursesHaveProof ? 'bg-red-600' : 'bg-gray-300'}`}
+                    disabled={uploading || (!DEMO_MODE && !allCoursesHaveProof)}
+                    className={`w-full py-4 rounded-full shadow-sm ${!uploading && (DEMO_MODE || allCoursesHaveProof) ? 'bg-red-600' : 'bg-gray-300'}`}
                 >
                     <Text className="text-center text-white text-base font-semibold">
                         Continue

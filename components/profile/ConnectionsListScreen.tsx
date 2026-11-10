@@ -1,5 +1,6 @@
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Image, Dimensions } from 'react-native';
 import { ArrowLeft, MessageSquare, UserMinus } from 'lucide-react-native';
+import { useState } from 'react';
 import { showConfirm } from '../../lib/alert';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
@@ -18,10 +19,12 @@ interface Connection {
 
 interface ConnectionsListScreenProps {
     connections: Connection[];
+    sentRequests: Array<{ id: string; name: string }>;
     onBack: () => void;
     onMessage: (connectionId: string) => void;
     onViewProfile: (connectionId: string) => void;
     onDisconnect: (connectionId: string, name: string) => void;
+    onCancelRequest: (userId: string) => Promise<void>;
     isDarkMode?: boolean;
     loading?: boolean;
     error?: string | null;
@@ -30,15 +33,18 @@ interface ConnectionsListScreenProps {
 
 export function ConnectionsListScreen({
     connections,
+    sentRequests,
     onBack,
     onMessage,
     onViewProfile,
     onDisconnect,
+    onCancelRequest,
     isDarkMode = false,
     loading = false,
     error = null,
     onRetry,
 }: ConnectionsListScreenProps) {
+    const [cancelingId, setCancelingId] = useState<string | null>(null);
     // Swipe gesture for back navigation
     const translateX = useSharedValue(0);
 
@@ -90,6 +96,34 @@ export function ConnectionsListScreen({
                 </View>
 
                 <ScrollView style={styles.scrollView} contentContainerStyle={{ paddingBottom: 100 }}>
+                    {!error && sentRequests.length > 0 && (
+                        <View style={styles.connectionsList}>
+                            <Text style={[styles.sectionTitle, isDarkMode && styles.textGrayDark]}>
+                                Sent requests ({sentRequests.length})
+                            </Text>
+                            {sentRequests.map((request) => (
+                                <View key={request.id} style={[styles.connectionCard, isDarkMode && styles.connectionCardDark]}>
+                                    <Text style={[styles.connectionName, isDarkMode && styles.textDark]}>{request.name}</Text>
+                                    <TouchableOpacity
+                                        disabled={cancelingId !== null}
+                                        onPress={async () => {
+                                            setCancelingId(request.id);
+                                            try {
+                                                await onCancelRequest(request.id);
+                                            } finally {
+                                                setCancelingId(null);
+                                            }
+                                        }}
+                                        accessibilityRole="button"
+                                    >
+                                        <Text style={{ color: '#db2321', fontWeight: '600' }}>
+                                            {cancelingId === request.id ? 'Canceling...' : 'Cancel request'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                        </View>
+                    )}
                     {error ? (
                         <View style={styles.emptyState}>
                             <Text style={[styles.emptyTitle, isDarkMode && styles.textDark]}>Couldn't load connections</Text>

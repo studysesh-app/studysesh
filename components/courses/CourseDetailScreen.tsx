@@ -399,7 +399,7 @@ export function CourseDetailScreen({
                     <View style={styles.statsBar}>
                         <View style={styles.statItem}>
                             <View style={styles.statDot} />
-                            <Text style={[styles.statText, isDarkMode && styles.textGrayDark]}>{activeCount} active</Text>
+                            <Text style={[styles.statText, isDarkMode && styles.textGrayDark]}>{activeCount} posts</Text>
                         </View>
                         <View style={styles.statItem}>
                             <Text style={styles.statIcon}>👥</Text>

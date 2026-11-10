@@ -29,6 +29,7 @@ export async function uploadAvatar(userId: string, localUri: string): Promise<st
 /** Uploads a local file URI to the private `proofs` bucket and returns its storage path. */
 export async function uploadTutorProof(userId: string, courseCode: string, localUri: string): Promise<string> {
     const blob = await uriToBlob(localUri);
+    if (blob.size > 10 * 1024 * 1024) throw new Error('Choose a file no larger than 10 MB.');
     const ext = extFromUri(localUri, 'jpg');
     const path = `${userId}/${courseCode.replace(/\s+/g, '_')}.${ext}`;
 
