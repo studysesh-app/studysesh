@@ -1,4 +1,5 @@
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions, ScrollView, Animated as RNAnimated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, ScrollView, Animated as RNAnimated } from 'react-native';
+import { PrivateAvatar } from '../PrivateAvatar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRef, useState } from 'react';
 import { showConfirm } from '../../lib/alert';
@@ -110,15 +111,7 @@ export function ProfileCard({
 
     const handleReportAction = () => {
         setMenuVisible(false);
-        setTimeout(() => {
-            showConfirm({
-                title: 'Report User',
-                message: `Report ${name} for inappropriate content, harassment, or spam?`,
-                confirmText: 'Report',
-                destructive: true,
-                onConfirm: () => onReport?.(),
-            });
-        }, 100);
+        setTimeout(() => onReport?.(), 100);
     };
 
     return (
@@ -131,7 +124,18 @@ export function ProfileCard({
                     style={styles.photoSection}
                 >
                     {photoUrl ? (
-                        <Image source={{ uri: photoUrl }} style={styles.photo} resizeMode="cover" />
+                        <PrivateAvatar
+                            reference={photoUrl}
+                            style={styles.photo}
+                            fallback={({ error, retry }) => (
+                                <View style={[styles.photoPlaceholder, isDarkMode && styles.photoPlaceholderDark]}>
+                                    <Text style={[styles.initials, isDarkMode && styles.initialsDark]}>{initials}</Text>
+                                    {error && <TouchableOpacity onPress={(event) => { event.stopPropagation(); retry(); }}>
+                                        <Text style={{ color: '#b91c1c', fontWeight: '600' }}>Retry photo</Text>
+                                    </TouchableOpacity>}
+                                </View>
+                            )}
+                        />
                     ) : (
                         <View style={[styles.photoPlaceholder, isDarkMode && styles.photoPlaceholderDark]}>
                             <Text style={[styles.initials, isDarkMode && styles.initialsDark]}>{initials}</Text>
@@ -141,6 +145,7 @@ export function ProfileCard({
                     <LinearGradient
                         colors={['transparent', 'rgba(0,0,0,0.8)']}
                         style={styles.photoGradient}
+                        pointerEvents="none"
                     />
 
                     {/* Menu Button */}
@@ -497,4 +502,3 @@ const styles = StyleSheet.create({
         color: '#d1d5db',
     },
 });
-

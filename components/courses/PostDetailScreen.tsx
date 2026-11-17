@@ -11,6 +11,7 @@ type PostType = 'post' | 'question';
 
 interface Comment {
     id: string;
+    authorId: string;
     authorName: string;
     authorInitial: string;
     authorYear: string;
@@ -23,6 +24,7 @@ interface Comment {
 
 interface PostDetailScreenProps {
     postId: string;
+    authorId: string;
     authorName: string;
     authorInitial: string;
     authorYear: string;
@@ -30,6 +32,7 @@ interface PostDetailScreenProps {
     content: string;
     likes: number;
     comments: Comment[];
+    totalComments?: number;
     isLiked: boolean;
     type: PostType;
     onBack: () => void;
@@ -38,12 +41,18 @@ interface PostDetailScreenProps {
     onAddComment: (content: string, parentId?: string | null) => void | Promise<boolean | void>;
     commentsError?: string | null;
     onRetryComments?: () => void;
+    commentsLoading?: boolean;
+    hasMoreComments?: boolean;
+    loadingMoreComments?: boolean;
+    loadMoreCommentsError?: string | null;
+    onLoadMoreComments?: () => void;
     onViewProfile?: (tutorId: string) => void;
     isDarkMode?: boolean;
 }
 
 export function PostDetailScreen({
     postId,
+    authorId,
     authorName,
     authorInitial,
     authorYear,
@@ -51,6 +60,7 @@ export function PostDetailScreen({
     content,
     likes,
     comments,
+    totalComments,
     isLiked,
     type,
     onBack,
@@ -59,10 +69,17 @@ export function PostDetailScreen({
     onAddComment,
     commentsError = null,
     onRetryComments,
+    commentsLoading = false,
+    hasMoreComments = false,
+    loadingMoreComments = false,
+    loadMoreCommentsError = null,
+    onLoadMoreComments,
     onViewProfile,
     isDarkMode = false,
 }: PostDetailScreenProps) {
     const [newComment, setNewComment] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+    const submittingRef = useRef(false);
     const [replyingTo, setReplyingTo] = useState<{ id: string; name: string } | null>(null);
     const scrollViewRef = useRef<ScrollView>(null);
     const inputRef = useRef<TextInput>(null);
@@ -98,14 +115,24 @@ export function PostDetailScreen({
     }));
 
     const handleSubmitComment = async () => {
-        if (newComment.trim()) {
-            const added = await onAddComment(newComment.trim(), replyingTo?.id ?? null);
-            if (added === false) {
-                showAlert('Comment not sent', 'Check your connection and try again. Your comment is still here.');
-                return;
+        if (newComment.trim() && !submittingRef.current) {
+            submittingRef.current = true;
+            setSubmitting(true);
+            try {
+                const added = await onAddComment(newComment.trim(), replyingTo?.id ?? null);
+                if (added === false) {
+                    showAlert('Comment not sent', 'Check your connection and try again. Your comment is still here.');
+                    return;
+                }
+                setNewComment('');
+                setReplyingTo(null);
+            } catch (error) {
+                console.error('Send comment failed:', error);
+                showAlert('Comment not sent', error instanceof Error ? error.message : 'Please try again. Your comment is still here.');
+            } finally {
+                submittingRef.current = false;
+                setSubmitting(false);
             }
-            setNewComment('');
-            setReplyingTo(null);
         }
     };
 
@@ -117,13 +144,15 @@ export function PostDetailScreen({
     };
 
     const handleReply = (comment: Comment) => {
+        if (submittingRef.current) return;
         const rootId = comment.parentId || comment.id;
         setReplyingTo({ id: rootId, name: comment.authorName });
         setNewComment('');
         inputRef.current?.focus();
     };
 
-    const topLevelComments = comments.filter((c) => !c.parentId);
+    const commentIds = new Set(comments.map((comment) => comment.id));
+    const topLevelComments = comments.filter((comment) => !comment.parentId || !commentIds.has(comment.parentId));
     const repliesFor = (id: string) => comments.filter((c) => c.parentId === id);
 
     return (
@@ -164,7 +193,7 @@ export function PostDetailScreen({
                             <TouchableOpacity
                                 style={styles.postAuthor}
                                 onPress={() => {
-                                    if (onViewProfile) onViewProfile(authorName);
+                                    if (onViewProfile) onViewProfile(authorId);
                                 }}
                             >
                                 <View style={styles.authorAvatar}>
@@ -201,13 +230,18 @@ export function PostDetailScreen({
                         {/* Comments Section */}
                         <View style={styles.commentsSection}>
                             <Text style={[styles.commentsHeader, isDarkMode && styles.textDark]}>
-                                Comments ({comments.length})
+                                Comments ({totalComments ?? comments.length})
                             </Text>
+                            {onRetryComments && (
+                                <TouchableOpacity onPress={onRetryComments} style={{ alignSelf: 'flex-end', padding: 8 }}>
+                                    <Text style={{ color: '#db2321', fontWeight: '600' }}>Refresh comments</Text>
+                                </TouchableOpacity>
+                            )}
 
-                            {commentsError ? (
+                            {commentsError && (
                                 <View style={{ paddingVertical: 12 }}>
                                     <Text style={{ color: isDarkMode ? '#fca5a5' : '#b91c1c' }}>
-                                        Couldn't load comments: {commentsError}
+                                        {commentsError}
                                     </Text>
                                     {onRetryComments && (
                                         <TouchableOpacity onPress={onRetryComments} style={{ paddingVertical: 12 }}>
@@ -215,7 +249,10 @@ export function PostDetailScreen({
                                         </TouchableOpacity>
                                     )}
                                 </View>
-                            ) : topLevelComments.length === 0 ? (
+                            )}
+                            {commentsLoading && comments.length === 0 ? (
+                                <View style={styles.emptyComments}><Text style={styles.emptyText}>Loading comments...</Text></View>
+                            ) : topLevelComments.length === 0 && !commentsError ? (
                                 <View style={styles.emptyComments}>
                                     <Text style={styles.emptyText}>No comments yet</Text>
                                     <Text style={styles.emptySubtext}>Be the first to comment!</Text>
@@ -227,7 +264,11 @@ export function PostDetailScreen({
                                         return (
                                             <View key={comment.id}>
                                                 <View style={[styles.commentCard, isDarkMode && styles.commentCardDark]}>
-                                                    <View style={styles.commentAuthor}>
+                                                    {comment.parentId && (
+                                                        <Text style={styles.commentMeta}>Original comment not loaded or unavailable</Text>
+                                                    )}
+                                                    <TouchableOpacity style={styles.commentAuthor}
+                                                        disabled={!onViewProfile} onPress={() => onViewProfile?.(comment.authorId)}>
                                                         <View style={styles.commentAvatar}>
                                                             <Text style={styles.commentAvatarText}>
                                                                 {comment.authorInitial}
@@ -239,15 +280,17 @@ export function PostDetailScreen({
                                                                 {comment.authorYear} • {comment.timestamp}
                                                             </Text>
                                                         </View>
-                                                    </View>
+                                                    </TouchableOpacity>
                                                     <Text style={[styles.commentContent, isDarkMode && styles.textGray200]}>{comment.content}</Text>
                                                     <View style={styles.commentActions}>
-                                                        <TouchableOpacity
-                                                            style={styles.commentAction}
-                                                            onPress={() => handleReply(comment)}
-                                                        >
-                                                            <Text style={styles.replyButtonText}>Reply</Text>
-                                                        </TouchableOpacity>
+                                                        {!comment.parentId && (
+                                                            <TouchableOpacity
+                                                                style={styles.commentAction}
+                                                                onPress={() => handleReply(comment)}
+                                                            >
+                                                                <Text style={styles.replyButtonText}>Reply</Text>
+                                                            </TouchableOpacity>
+                                                        )}
                                                         <TouchableOpacity
                                                             style={styles.commentAction}
                                                             onPress={() => handleLikeComment(comment.id)}
@@ -268,7 +311,8 @@ export function PostDetailScreen({
                                                 </View>
                                                 {replies.map((reply) => (
                                                     <View key={reply.id} style={[styles.replyCard, isDarkMode && styles.commentCardDark]}>
-                                                        <View style={styles.commentAuthor}>
+                                                        <TouchableOpacity style={styles.commentAuthor}
+                                                            disabled={!onViewProfile} onPress={() => onViewProfile?.(reply.authorId)}>
                                                             <View style={styles.commentAvatar}>
                                                                 <Text style={styles.commentAvatarText}>
                                                                     {reply.authorInitial}
@@ -280,7 +324,7 @@ export function PostDetailScreen({
                                                                     {reply.authorYear} • {reply.timestamp}
                                                                 </Text>
                                                             </View>
-                                                        </View>
+                                                        </TouchableOpacity>
                                                         <Text style={[styles.commentContent, isDarkMode && styles.textGray200]}>{reply.content}</Text>
                                                         <View style={styles.commentActions}>
                                                             <TouchableOpacity
@@ -313,6 +357,16 @@ export function PostDetailScreen({
                                     })}
                                 </View>
                             )}
+                            {hasMoreComments && onLoadMoreComments && (
+                                <View style={{ alignItems: 'center', padding: 12 }}>
+                                    {loadMoreCommentsError && <Text style={{ color: '#b91c1c' }}>{loadMoreCommentsError}</Text>}
+                                    <TouchableOpacity onPress={onLoadMoreComments} disabled={loadingMoreComments} style={{ padding: 10 }}>
+                                        <Text style={{ color: '#db2321', fontWeight: '600' }}>
+                                            {loadingMoreComments ? 'Loading...' : loadMoreCommentsError ? 'Try loading more' : 'Load more comments'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
                         </View>
                     </ScrollView>
 
@@ -323,7 +377,7 @@ export function PostDetailScreen({
                                 <Text style={styles.replyingText} numberOfLines={1}>
                                     Replying to {replyingTo.name}
                                 </Text>
-                                <TouchableOpacity onPress={() => setReplyingTo(null)}>
+                                <TouchableOpacity onPress={() => setReplyingTo(null)} disabled={submitting}>
                                     <Text style={styles.replyingCancel}>Cancel</Text>
                                 </TouchableOpacity>
                             </View>
@@ -344,6 +398,7 @@ export function PostDetailScreen({
                                     placeholderTextColor={isDarkMode ? '#6b7280' : '#9ca3af'}
                                     value={newComment}
                                     onChangeText={setNewComment}
+                                    editable={!submitting}
                                     multiline
                                     maxLength={500}
                                     scrollEnabled={false}
@@ -356,7 +411,7 @@ export function PostDetailScreen({
                         <TouchableOpacity
                             style={[styles.sendButton, !newComment.trim() && styles.sendButtonDisabled]}
                             onPress={handleSubmitComment}
-                            disabled={!newComment.trim()}
+                            disabled={submitting || !newComment.trim()}
                         >
                             <Send size={20} color="#fff" />
                         </TouchableOpacity>

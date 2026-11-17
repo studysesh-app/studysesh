@@ -1,5 +1,5 @@
 import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Send } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,17 +13,29 @@ interface ChatInputProps {
 
 export function ChatInput({ onSend, placeholder = 'Type a message...', isDarkMode = false }: ChatInputProps) {
     const [message, setMessage] = useState('');
+    const [sending, setSending] = useState(false);
+    const sendingRef = useRef(false);
     const insets = useSafeAreaInsets();
 
     const handleSend = async () => {
         const text = message.trim();
-        if (!text) return;
-        const sent = await onSend(text);
-        if (sent === false) {
-            showAlert('Message not sent', 'Check your connection and try again. Your message is still here.');
-            return;
+        if (!text || sendingRef.current) return;
+        sendingRef.current = true;
+        setSending(true);
+        try {
+            const sent = await onSend(text);
+            if (sent === false) {
+                showAlert('Message not sent', 'Check your connection and try again. Your message is still here.');
+                return;
+            }
+            setMessage('');
+        } catch (error) {
+            console.error('Send message failed:', error);
+            showAlert('Message not sent', error instanceof Error ? error.message : 'Please try again. Your message is still here.');
+        } finally {
+            sendingRef.current = false;
+            setSending(false);
         }
-        setMessage('');
     };
 
     return (
@@ -36,6 +48,8 @@ export function ChatInput({ onSend, placeholder = 'Type a message...', isDarkMod
                     <TextInput
                         value={message}
                         onChangeText={setMessage}
+                        editable={!sending}
+                        maxLength={4000}
                         placeholder={placeholder}
                         placeholderTextColor={isDarkMode ? '#9ca3af' : '#8E8E93'}
                         multiline
@@ -46,7 +60,7 @@ export function ChatInput({ onSend, placeholder = 'Type a message...', isDarkMod
 
                 <TouchableOpacity
                     onPress={handleSend}
-                    disabled={!message.trim()}
+                    disabled={sending || !message.trim()}
                     className={`w-10 h-10 rounded-full items-center justify-center overflow-hidden ${!message.trim() ? 'opacity-50' : ''}`}
                     style={message.trim() ? styles.sendButton : undefined}
                 >

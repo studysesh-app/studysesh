@@ -8,10 +8,11 @@ interface TutorCourseApplicationScreenProps {
     onBack: () => void;
     onContinue: (appliedCourses: string[]) => void;
     isDarkMode?: boolean;
+    initialCourses?: string[];
 }
 
-export function TutorCourseApplicationScreen({ onBack, onContinue, isDarkMode = false }: TutorCourseApplicationScreenProps) {
-    const [appliedCourses, setAppliedCourses] = useState<string[]>([]);
+export function TutorCourseApplicationScreen({ onBack, onContinue, isDarkMode = false, initialCourses = [] }: TutorCourseApplicationScreenProps) {
+    const [appliedCourses, setAppliedCourses] = useState<string[]>(initialCourses);
     const [showAddModal, setShowAddModal] = useState(false);
 
     const handleAddCourse = (courseCode: string) => {
@@ -25,7 +26,7 @@ export function TutorCourseApplicationScreen({ onBack, onContinue, isDarkMode = 
     };
 
     const handleContinue = () => {
-        onContinue(appliedCourses.length > 0 ? appliedCourses : ['SYSC 2006', 'COMP 2402']);
+        if (appliedCourses.length > 0) onContinue(appliedCourses);
     };
 
     return (
@@ -108,7 +109,8 @@ export function TutorCourseApplicationScreen({ onBack, onContinue, isDarkMode = 
             <View className="p-4 border-t border-gray-200 dark:border-gray-800">
                 <TouchableOpacity
                     onPress={handleContinue}
-                    className="w-full py-4 bg-red-600 rounded-full shadow-sm"
+                    disabled={appliedCourses.length === 0}
+                    className={`w-full py-4 rounded-full shadow-sm ${appliedCourses.length > 0 ? 'bg-red-600' : 'bg-gray-300'}`}
                 >
                     <Text className="text-center text-white text-base font-semibold">
                         Continue

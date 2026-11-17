@@ -1,4 +1,5 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { showConfirm } from '../lib/alert';
 import { LinearGradient } from 'expo-linear-gradient';
 
 interface ConversationItemProps {
@@ -29,7 +30,12 @@ export function ConversationItem({
     return (
         <TouchableOpacity
             onPress={onClick}
-            onLongPress={onDelete}
+            onLongPress={onDelete ? () => showConfirm({
+                title: 'Hide conversation',
+                message: 'This hides the conversation from your list. It reappears if either of you sends a new message, and its history remains available.',
+                confirmText: 'Hide',
+                onConfirm: onDelete,
+            }) : undefined}
             style={[styles.container, isDarkMode && styles.containerDark]}
             activeOpacity={0.8}
         >

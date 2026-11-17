@@ -29,6 +29,11 @@ interface ActivityScreenProps {
     loading?: boolean;
     error?: string | null;
     onRetry?: () => void;
+    unreadCount?: number;
+    hasMore?: boolean;
+    loadingMore?: boolean;
+    loadMoreError?: string | null;
+    onLoadMore?: () => void;
 }
 
 export function ActivityScreen({
@@ -42,8 +47,13 @@ export function ActivityScreen({
     loading = false,
     error = null,
     onRetry,
+    unreadCount: totalUnread,
+    hasMore = false,
+    loadingMore = false,
+    loadMoreError = null,
+    onLoadMore,
 }: ActivityScreenProps) {
-    const unreadCount = activities.filter(a => a.isUnread).length;
+    const unreadCount = totalUnread ?? activities.filter(a => a.isUnread).length;
 
     const getNotificationData = (activity: ActivityItem) => {
         switch (activity.type) {
@@ -214,6 +224,16 @@ export function ActivityScreen({
                                 </TouchableOpacity>
                             );
                         })}
+                    </View>
+                )}
+                {hasMore && onLoadMore && !error && (
+                    <View style={{ alignItems: 'center', padding: 16 }}>
+                        {loadMoreError && <Text style={styles.emptySubtitle}>{loadMoreError}</Text>}
+                        <TouchableOpacity onPress={onLoadMore} disabled={loadingMore} style={{ padding: 12 }}>
+                            <Text style={styles.markAllRead}>
+                                {loadingMore ? 'Loading...' : loadMoreError ? 'Try loading more' : 'Load more activity'}
+                            </Text>
+                        </TouchableOpacity>
                     </View>
                 )}
             </ScrollView>

@@ -15,6 +15,7 @@ interface TutorProfileScreenProps {
     onEditPricing: () => void;
     onSettings: () => void;
     onConnections: () => void;
+    onStudentMode: () => void;
     onLogout: () => void;
     isDarkMode?: boolean;
 }
@@ -30,6 +31,7 @@ export function TutorProfileScreen({
     onEditPricing,
     onSettings,
     onConnections,
+    onStudentMode,
     onLogout,
     isDarkMode = false
 }: TutorProfileScreenProps) {
@@ -38,6 +40,7 @@ export function TutorProfileScreen({
         { icon: User, label: 'Edit Profile', onPress: onEditProfile },
         { icon: BookOpen, label: 'My Courses', onPress: onEditCourses },
         { icon: DollarSign, label: 'Pricing', onPress: onEditPricing },
+        { icon: BookOpen, label: 'Switch to Student', onPress: onStudentMode },
         { icon: Settings, label: 'Settings', onPress: onSettings },
     ];
 

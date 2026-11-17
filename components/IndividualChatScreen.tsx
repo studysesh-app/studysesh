@@ -31,6 +31,10 @@ interface IndividualChatScreenProps {
     error?: string | null;
     loadingMessages?: boolean;
     onRetry?: () => void;
+    hasOlderMessages?: boolean;
+    loadingOlderMessages?: boolean;
+    olderMessagesError?: string | null;
+    onLoadOlderMessages?: () => void;
 }
 
 export function IndividualChatScreen({
@@ -46,9 +50,14 @@ export function IndividualChatScreen({
     error = null,
     loadingMessages = false,
     onRetry,
+    hasOlderMessages = false,
+    loadingOlderMessages = false,
+    olderMessagesError = null,
+    onLoadOlderMessages,
 }: IndividualChatScreenProps) {
     const isTutor = type === 'tutor';
     const scrollViewRef = useRef<ScrollView>(null);
+    const lastMessageId = useRef<string | null>(null);
     const insets = useSafeAreaInsets();
 
     // Swipe gesture handler
@@ -82,11 +91,13 @@ export function IndividualChatScreen({
     }));
 
     useEffect(() => {
-        if (messages.length > 0) {
+        const newestId = messages[messages.length - 1]?.id ?? null;
+        if (newestId && newestId !== lastMessageId.current) {
             setTimeout(() => {
                 scrollViewRef.current?.scrollToEnd({ animated: true });
             }, 100);
         }
+        lastMessageId.current = newestId;
     }, [messages]);
 
     // Re-added keyboard listener to ensure visibility
@@ -190,11 +201,22 @@ export function IndividualChatScreen({
                         <ScrollView
                             ref={scrollViewRef}
                             className="flex-1 px-4"
+                            maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
                             contentContainerStyle={{
                                 paddingTop: 140, // Increased to ensure no overlap with solid header
                                 paddingBottom: 10 // Reduced padding below last message
                             }}
                         >
+                            {hasOlderMessages && onLoadOlderMessages && (
+                                <View style={{ alignItems: 'center', padding: 12 }}>
+                                    {olderMessagesError && <Text style={{ color: '#b91c1c' }}>{olderMessagesError}</Text>}
+                                    <TouchableOpacity onPress={onLoadOlderMessages} disabled={loadingOlderMessages} style={{ padding: 8 }}>
+                                        <Text style={{ color: '#db2321', fontWeight: '600' }}>
+                                            {loadingOlderMessages ? 'Loading...' : olderMessagesError ? 'Try loading older messages' : 'Load older messages'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
                             {error ? (
                                 <View style={{ padding: 12, marginBottom: 12, borderRadius: 8, backgroundColor: isDarkMode ? '#3f1d1d' : '#fef2f2' }}>
                                     <Text style={{ color: isDarkMode ? '#fecaca' : '#991b1b' }}>{error}</Text>

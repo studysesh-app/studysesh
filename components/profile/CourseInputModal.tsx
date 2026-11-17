@@ -8,6 +8,7 @@ import { DEMO_MODE, searchCoursesDemo } from '../../lib/demo';
 export interface ProofFile {
     uri: string;
     courseCode: string;
+    mimeType?: string;
 }
 
 interface CourseInputModalProps {
@@ -32,7 +33,7 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
     const [searching, setSearching] = useState(false);
     const [searchError, setSearchError] = useState<string | null>(null);
     const [retrySearch, setRetrySearch] = useState(0);
-    const [proofUploaded, setProofUploaded] = useState(false);
+    const [proofCourse, setProofCourse] = useState<string | null>(null);
 
     // Also keep manual input as fallback
     const [prefix, setPrefix] = useState('');
@@ -63,6 +64,7 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
                 const { data, error } = await supabase
                     .from('courses')
                     .select('id, code, name')
+                    .eq('is_active', true)
                     .or(`code.ilike.%${q}%,name.ilike.%${q}%`)
                     .limit(20)
                     .order('code');
@@ -111,8 +113,8 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
         if (!courseCode) return;
 
         if (onProofUpload) {
-            onProofUpload({ uri: result.assets[0].uri, courseCode });
-            setProofUploaded(true);
+            onProofUpload({ uri: result.assets[0].uri, courseCode, mimeType: result.assets[0].mimeType ?? undefined });
+            setProofCourse(courseCode);
         }
     };
 
@@ -140,20 +142,22 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
         setSelectedCourse(null);
         setPrefix('');
         setSuffix('');
-        setProofUploaded(false);
+        setProofCourse(null);
         onClose();
     };
 
     const isValid = mode === 'search'
         ? !!selectedCourse
         : prefix.length >= 3 && suffix.length === 4;
+    const selectedCode = mode === 'search' ? selectedCourse?.code : `${prefix} ${suffix}`;
+    const proofUploaded = !!selectedCode && proofCourse === selectedCode;
 
     return (
         <Modal
             visible={isOpen}
             transparent
             animationType="fade"
-            onRequestClose={onClose}
+            onRequestClose={resetAndClose}
         >
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -165,7 +169,7 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
                         <Text className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
                             Add Course
                         </Text>
-                        <TouchableOpacity onPress={onClose} className="p-2 -mr-2">
+                        <TouchableOpacity onPress={resetAndClose} className="p-2 -mr-2">
                             <X size={20} color={isDarkMode ? '#9ca3af' : '#9ca3af'} />
                         </TouchableOpacity>
                     </View>
@@ -285,7 +289,7 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
                     {/* Action Buttons */}
                     <View className="flex-row gap-3">
                         <TouchableOpacity
-                            onPress={onClose}
+                            onPress={resetAndClose}
                             className={`flex-1 py-3 rounded-full ${isDarkMode ? 'bg-gray-800' : 'bg-gray-100'}`}
                         >
                             <Text className={`text-center font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>

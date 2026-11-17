@@ -1,4 +1,5 @@
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Image, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions } from 'react-native';
+import { PrivateAvatar } from '../PrivateAvatar';
 import { ArrowLeft, MessageSquare, UserMinus } from 'lucide-react-native';
 import { useState } from 'react';
 import { showConfirm } from '../../lib/alert';
@@ -159,9 +160,19 @@ export function ConnectionsListScreen({
                                 >
                                     <View style={styles.connectionLeft}>
                                         {connection.photoUrl ? (
-                                            <Image
-                                                source={{ uri: connection.photoUrl }}
+                                            <PrivateAvatar
+                                                reference={connection.photoUrl}
                                                 style={styles.avatar}
+                                                fallback={({ error, retry }) => (
+                                                    <TouchableOpacity
+                                                        style={[styles.avatarPlaceholder, isDarkMode && styles.avatarPlaceholderDark]}
+                                                        onPress={(event) => { event.stopPropagation(); if (error) retry(); }}
+                                                        disabled={!error}
+                                                        accessibilityLabel={error ? 'Retry photo' : 'Loading photo'}
+                                                    >
+                                                        <Text style={styles.avatarText}>{error ? '!' : connection.name.charAt(0)}</Text>
+                                                    </TouchableOpacity>
+                                                )}
                                             />
                                         ) : (
                                             <View style={[styles.avatarPlaceholder, isDarkMode && styles.avatarPlaceholderDark]}>

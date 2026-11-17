@@ -20,6 +20,9 @@ function WelcomeContent({ onGetStarted, onSignIn }: WelcomeScreenProps) {
             <Text className="text-lg text-center mb-8 max-w-xs text-white/90">
                 Connect with top students. Master your courses. Excel together.
             </Text>
+            <Text className="text-xs text-center mb-4 text-white/80">
+                Floating profiles are examples, not live listings.
+            </Text>
 
             {/* Get Started Button */}
             <View className="w-full max-w-sm mb-4">

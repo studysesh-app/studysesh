@@ -20,15 +20,15 @@ export function TutorOnboardingSuccessScreen({ onComplete }: TutorOnboardingSucc
 
                 {/* Success Message */}
                 <Text className="text-white text-3xl font-bold text-center mb-3">
-                    Applications Submitted!
+                    Ready to Finish
                 </Text>
 
                 <Text className="text-white/90 text-base text-center mb-4 max-w-xs">
-                    Your course applications are pending approval. Our team will review your qualifications and notify you within 2-3 business days.
+                    Finish setting up your account to publish your tutoring courses.
                 </Text>
 
                 <Text className="text-white/80 text-sm text-center mb-12 max-w-xs">
-                    We'll send you an email when your applications are approved.
+                    Listings are approved automatically. Proof may be reviewed by an administrator.
                 </Text>
 
                 {/* Continue Button */}
@@ -42,7 +42,7 @@ export function TutorOnboardingSuccessScreen({ onComplete }: TutorOnboardingSucc
                         style={styles.button}
                     >
                         <Text style={styles.buttonText}>
-                            Go to Profile
+                            Finish Setup
                         </Text>
                     </LinearGradient>
                 </TouchableOpacity>

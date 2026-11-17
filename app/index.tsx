@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useLayoutEffect } from 'react';
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
 import { View, LogBox, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { showAlert } from '../lib/alert';
@@ -8,14 +8,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 import { useCourses } from '../hooks/useCourses';
 import { usePosts } from '../hooks/usePosts';
+import { useComments } from '../hooks/useComments';
 import { useConnections } from '../hooks/useConnections';
 import { useActivity } from '../hooks/useActivity';
 import { useClassmates } from '../hooks/useClassmates';
 import { useChat } from '../hooks/useChat';
-import { uploadAvatar } from '../lib/storage';
+import { useModeration } from '../hooks/useModeration';
+import { usePushNotifications } from '../hooks/usePushNotifications';
+import { removeOwnedAvatar, uploadAvatar } from '../lib/storage';
+import { isLocalImageReference } from '../lib/avatar';
 import { supabase } from '../lib/supabase';
 import { DEMO_MODE, displayName } from '../lib/demo';
-import { openSupportEmail } from '../lib/support';
 import { ThemeProvider } from '../lib/theme';
 import { colorScheme as nativewindColorScheme } from 'nativewind';
 
@@ -51,6 +54,7 @@ import { BlockedUsersScreen } from '../components/profile/BlockedUsersScreen';
 import { PrivacyPolicyScreen } from '../components/profile/PrivacyPolicyScreen';
 import { TermsOfServiceScreen } from '../components/profile/TermsOfServiceScreen';
 import { ConnectionsListScreen } from '../components/profile/ConnectionsListScreen';
+import { ModerationScreen } from '../components/profile/ModerationScreen';
 import { PricingEditorScreen } from '../components/tutor/PricingEditorScreen';
 import { TutorDetailModal } from '../components/TutorDetailModal';
 
@@ -72,6 +76,7 @@ import { TutorProofUploadScreen } from '../components/onboarding/TutorProofUploa
 import { ForgotPasswordScreen } from '../components/onboarding/ForgotPasswordScreen';
 import { StudentProfileScreen } from '../components/StudentProfileScreen';
 import { StudentProfileModal } from '../components/classmates/StudentProfileModal';
+import { ReportUserModal } from '../components/classmates/ReportUserModal';
 
 type SocialTabValue = 'home' | 'classmates' | 'chat' | 'activity' | 'profile';
 type TutorTabValue = 'home' | 'connections' | 'chat' | 'activity' | 'profile';
@@ -88,7 +93,11 @@ type ProfileScreen =
     | 'blocked-users'
     | 'privacy-policy'
     | 'terms-of-service'
-    | 'pricing-editor';
+    | 'pricing-editor'
+    | 'moderation'
+    | 'become-tutor-courses'
+    | 'become-tutor-proof'
+    | 'become-tutor-pricing';
 
 type OnboardingScreen =
     | 'welcome'
@@ -126,11 +135,17 @@ export default function App() {
     } | null>(null);
     const [onboardingTutorProofs, setOnboardingTutorProofs] = useState<Record<string, string>>({});
 
-    // Auto-login: if user has session + profile, skip onboarding
+    const activeAccount = useRef<string | null>(null);
+    // Auto-login: choose the initial mode once per account.
     useLayoutEffect(() => {
         if (!auth.loading && auth.session && auth.profile) {
-            setUserRole(auth.profile.is_tutor ? 'tutor' : 'student');
+            if (activeAccount.current !== auth.profile.id) {
+                activeAccount.current = auth.profile.id;
+                setUserRole(auth.profile.is_tutor ? 'tutor' : 'student');
+            }
             setIsOnboarding(false);
+        } else if (!auth.loading && !auth.session) {
+            activeAccount.current = null;
         }
     }, [auth.loading, auth.session, auth.profile]);
 
@@ -140,6 +155,7 @@ export default function App() {
     const activityFeed = useActivity(currentUserId);
     const classmatesFeed = useClassmates(currentUserId);
     const chat = useChat(currentUserId);
+    const moderation = useModeration(currentUserId);
 
     // Map real classmate profiles to the shape ClassmatesScreen/ActivityScreen/etc. expect.
     const mockClassmates = classmatesFeed.classmates.map((c) => ({
@@ -157,6 +173,14 @@ export default function App() {
     // --- Universal Profile Viewer State ---
     const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
     const [selectedProfileData, setSelectedProfileData] = useState<any>(null);
+    const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+    const profileRequestRevision = useRef(0);
+    useEffect(() => {
+        profileRequestRevision.current++;
+        setSelectedProfileId(null);
+        setSelectedProfileData(null);
+        setReportTarget(null);
+    }, [currentUserId]);
 
     // Real profile data (single profile shared across student/tutor views since is_tutor is one flag on one profile)
     const studentProfile = {
@@ -174,42 +198,62 @@ export default function App() {
     const tutorProfile = studentProfile;
     const profileSubtitle = [studentProfile.year, studentProfile.program].filter(Boolean).join(' ');
 
-    const handleViewProfile = (profileId: string) => {
-        let profile: any = mockClassmates.find((u) => u.id === profileId || u.name === profileId);
-        if (!profile) {
-            profile = connections.friendProfiles.find((u) => u.id === profileId || u.name === profileId);
-        }
-
-        if (profile) {
-            setSelectedProfileData({ ...profile, prompts: profile.prompts ?? [] });
-            setSelectedProfileId(profile.id);
+    const handleViewProfile = async (profileId: string) => {
+        const revision = ++profileRequestRevision.current;
+        const classmate = mockClassmates.find((person) => person.id === profileId || person.name === profileId);
+        const friend = connections.friendProfiles.find((person) => person.id === profileId || person.name === profileId);
+        const id = classmate?.id ?? friend?.id ?? profileId;
+        if (!id || connections.blocked.has(id)) {
+            showAlert('Profile unavailable', 'This profile cannot be viewed.');
             return;
         }
-
-        if (DEMO_MODE || !profileId) return;
-        supabase
-            .from('users')
-            .select('id, name, pronouns, year, major, photo_url, gender')
-            .eq('id', profileId)
-            .maybeSingle()
-            .then(({ data }) => {
-                if (!data) return;
-                setSelectedProfileData({
-                    id: data.id,
-                    name: data.name,
-                    pronouns: (data.pronouns ?? []).join('/').toLowerCase(),
-                    year: data.year ?? '',
-                    major: data.major ?? '',
-                    gender: data.gender,
-                    photoUrl: data.photo_url ?? undefined,
-                    sharedCourses: [],
-                    prompts: [],
-                });
-                setSelectedProfileId(data.id);
+        if (DEMO_MODE) {
+            if (classmate || friend) {
+                setSelectedProfileData({ ...(classmate ?? friend), prompts: classmate?.prompts ?? [] });
+                setSelectedProfileId(id);
+            } else {
+                showAlert('Profile unavailable', 'This profile cannot be viewed.');
+            }
+            return;
+        }
+        try {
+            const [userResult, promptsResult] = await Promise.all([
+                supabase.from('users').select('id, name, pronouns, year, major, photo_url, gender').eq('id', id).maybeSingle(),
+                supabase.from('user_prompts').select('prompt, answer').eq('user_id', id).order('sort_order'),
+            ]);
+            if (revision !== profileRequestRevision.current) return;
+            const error = userResult.error ?? promptsResult.error;
+            if (error) {
+                console.error('Fetch profile error:', error);
+                showAlert('Could not load profile', error.message);
+                return;
+            }
+            if (!userResult.data) {
+                showAlert('Profile unavailable', 'This profile cannot be viewed.');
+                return;
+            }
+            const person = userResult.data;
+            setSelectedProfileData({
+                id: person.id,
+                name: person.name,
+                pronouns: (person.pronouns ?? []).join('/').toLowerCase(),
+                year: person.year ?? '',
+                major: person.major ?? '',
+                gender: person.gender,
+                photoUrl: person.photo_url ?? undefined,
+                sharedCourses: classmate?.sharedCourses ?? friend?.sharedCourses ?? [],
+                prompts: promptsResult.data ?? [],
             });
+            setSelectedProfileId(person.id);
+        } catch (error) {
+            if (revision !== profileRequestRevision.current) return;
+            console.error('Fetch profile failed:', error);
+            showAlert('Could not load profile', error instanceof Error ? error.message : 'Please try again.');
+        }
     };
 
     const handleCloseProfile = () => {
+        profileRequestRevision.current++;
         setSelectedProfileId(null);
         setSelectedProfileData(null);
     };
@@ -232,7 +276,7 @@ export default function App() {
     const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
     const boardPosts = usePosts(selectedCourse, currentUserId);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
-    const [postComments, setPostComments] = useState<Awaited<ReturnType<typeof boardPosts.fetchComments>>>([]);
+    const commentsFeed = useComments(selectedPostId, currentUserId, boardPosts.subscribeBoardEvents);
     const [courseTutors, setCourseTutors] = useState<Array<{ id: string; name: string; pronouns: string; groupPrice: string | null; individualPrice: string | null; location: string[] }>>([]);
     const [courseTutorsLoading, setCourseTutorsLoading] = useState(false);
     const [courseTutorsError, setCourseTutorsError] = useState<string | null>(null);
@@ -260,10 +304,7 @@ export default function App() {
                 return;
             }
             const { data: rows, error: tutorsError } = await supabase
-                .from('tutor_courses')
-                .select('user_id, group_price, individual_price, session_type, users(name, pronouns)')
-                .eq('course_id', course.id)
-                .eq('is_approved', true);
+                .rpc('course_tutors', { p_course_id: course.id });
             if (tutorsError) {
                 console.error('Fetch course tutors error:', tutorsError);
                 if (isCurrent) setCourseTutorsError(tutorsError.message);
@@ -275,8 +316,8 @@ export default function App() {
                     .filter((r: any) => r.user_id !== currentUserId && !connections.blocked.has(r.user_id))
                     .map((r: any) => ({
                     id: r.user_id,
-                    name: r.users?.name ?? 'Unknown',
-                    pronouns: (r.users?.pronouns ?? []).join('/').toLowerCase(),
+                    name: r.name,
+                    pronouns: (r.pronouns ?? []).join('/').toLowerCase(),
                     groupPrice: r.group_price != null ? String(r.group_price) : null,
                     individualPrice: r.individual_price != null ? String(r.individual_price) : null,
                     location: r.session_type === 'both' ? ['online', 'in-person'] : [r.session_type ?? 'online'],
@@ -295,15 +336,6 @@ export default function App() {
             isCurrent = false;
         };
     }, [selectedCourse, currentUserId, connections.blocked, courseTutorRetry]);
-
-    // Load comments whenever a post is opened
-    useEffect(() => {
-        if (!selectedPostId) {
-            setPostComments([]);
-            return;
-        }
-        boardPosts.fetchComments(selectedPostId).then(setPostComments);
-    }, [selectedPostId]);
 
     // Tutor detail modal state
     const [selectedTutorForDetail, setSelectedTutorForDetail] = useState<any | null>(null);
@@ -332,6 +364,7 @@ export default function App() {
             showAlert('Could not block user', error);
             return;
         }
+        handleCloseProfile();
         showAlert('Blocked', `${name} has been blocked.`);
     };
 
@@ -342,18 +375,7 @@ export default function App() {
         return await uploadAvatar(uid, local);
     };
 
-    const handleReportUser = async (id: string, name: string) => {
-        const error = await connections.report(id, 'Reported from Connect');
-        if (error) {
-            showAlert('Could not submit report', error);
-            return;
-        }
-        openSupportEmail(
-            `Report: ${name}`,
-            `I would like to report ${name} (user id: ${id}).\n\nReason:\n`
-        );
-        showAlert('Report submitted', 'Thanks — we received your report.');
-    };
+    const handleReportUser = (id: string, name: string) => setReportTarget({ id, name });
 
     // Chat state — backed by the real-data useChat hook (see top of component).
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
@@ -362,6 +384,9 @@ export default function App() {
 
     // Profile screen state and user data
     const [profileScreen, setProfileScreen] = useState<ProfileScreen>('main');
+    const [tutorApplicationCourses, setTutorApplicationCourses] = useState<string[]>([]);
+    const [tutorApplicationProofs, setTutorApplicationProofs] = useState<Record<string, string>>({});
+    const [submittingTutorApplication, setSubmittingTutorApplication] = useState(false);
 
     useEffect(() => {
         if (profileScreen === 'connections') connections.refresh();
@@ -408,10 +433,18 @@ export default function App() {
             console.error('Save local theme error:', error);
             showAlert('Could not save theme', error instanceof Error ? error.message : 'Please try again.');
         }
-        const { error } = await auth.updateProfile({ theme: newTheme });
+        const { error, saved, unknown } = await auth.updateProfile({ theme: newTheme });
         if (error) {
-            setTheme(previousTheme);
-            showAlert('Could not save theme', error);
+            if (!saved && !unknown) {
+                setTheme(previousTheme);
+                try {
+                    await AsyncStorage.setItem('studysesh-theme', previousTheme);
+                } catch (failure) {
+                    console.error('Restore local theme failed:', failure);
+                    showAlert('Could not restore local theme', 'Your saved theme may be inconsistent on this device.');
+                }
+            }
+            showAlert(saved ? 'Theme saved' : 'Could not save theme', error);
         }
     };
 
@@ -420,6 +453,10 @@ export default function App() {
         setOnboardingScreen('welcome');
         setProfileScreen('main');
         setTheme('light');
+        const pushError = await push.unregisterCurrentDevice();
+        if (pushError) {
+            showAlert('Push device not removed', `You will be signed out, but this device may still receive generic notifications until it reconnects: ${pushError}`);
+        }
         try {
             await auth.signOut();
         } catch (e) {
@@ -433,9 +470,7 @@ export default function App() {
         program: auth.profile?.major ?? '',
         bio: auth.profile?.bio ?? '',
         email: auth.profile?.email ?? '',
-        phone: '',
         courses: myStudyingCourses,
-        language: 'English',
     };
 
     // Real activity/notifications data (from useActivity)
@@ -446,6 +481,14 @@ export default function App() {
 
     // State for new social app tab
     const [socialActiveTab, setSocialActiveTab] = useState<SocialTabValue>('home');
+    const push = usePushNotifications(currentUserId, () => {
+        setSelectedCourse(null);
+        setSelectedPostId(null);
+        setSelectedConversationId(null);
+        if (userRole === 'tutor') setActiveTutorTab('activity');
+        else setSocialActiveTab('activity');
+        activityFeed.refresh();
+    });
     const currentUserGender = (auth.profile?.gender ?? 'Prefer not to say') as 'Man' | 'Woman' | 'Non-Binary' | 'Prefer not to say';
     const [userStatus, setUserStatus] = useState(auth.profile?.status || 'Studying');
 
@@ -456,10 +499,10 @@ export default function App() {
     const handleStatusChange = (status: string) => {
         const previousStatus = userStatus;
         setUserStatus(status);
-        auth.updateProfile({ status }).then(({ error }) => {
+        auth.updateProfile({ status }).then(({ error, saved, unknown }) => {
             if (error) {
-                setUserStatus(previousStatus);
-                showAlert('Could not save status', error);
+                if (!saved && !unknown) setUserStatus(previousStatus);
+                showAlert(saved ? 'Status saved' : 'Could not save status', error);
             }
         });
     };
@@ -474,6 +517,11 @@ export default function App() {
                 return (
                     <ActivityScreen
                         activities={activities}
+                        unreadCount={activityFeed.unreadCount}
+                        hasMore={activityFeed.hasMore}
+                        loadingMore={activityFeed.loadingMore}
+                        loadMoreError={activityFeed.loadMoreError}
+                        onLoadMore={activityFeed.loadMore}
                         onAcceptConnection={async (id) => {
                             const activity = activities.find(a => a.id === id);
                             if (activity?.referenceId) {
@@ -545,6 +593,10 @@ export default function App() {
                             classmatesFeed.refresh();
                             connections.refresh();
                         }}
+                        hasMore={classmatesFeed.hasMore}
+                        loadingMore={classmatesFeed.loadingMore}
+                        loadMoreError={classmatesFeed.loadMoreError}
+                        onLoadMore={classmatesFeed.loadMore}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -563,6 +615,10 @@ export default function App() {
                         loading={chat.loading}
                         error={chat.error}
                         onRetry={chat.refreshConversations}
+                        hasMore={chat.hasMoreConversations}
+                        loadingMore={chat.loadingMoreConversations}
+                        loadMoreError={chat.conversationPageError}
+                        onLoadMore={chat.loadMoreConversations}
                         isTutor={true}
                         isDarkMode={theme === 'dark'}
                     />
@@ -579,6 +635,11 @@ export default function App() {
                         onEditPricing={() => setProfileScreen('pricing-editor')}
                         onSettings={() => setProfileScreen('settings')}
                         onConnections={() => setProfileScreen('connections')}
+                        onStudentMode={() => {
+                            setProfileScreen('main');
+                            setSocialActiveTab('profile');
+                            setUserRole('student');
+                        }}
                         connectionsCount={connectedFriends.size}
                         onLogout={handleLogout}
                         isDarkMode={theme === 'dark'}
@@ -660,6 +721,10 @@ export default function App() {
                     postsLoading={boardPosts.loading}
                     postsError={boardPosts.error}
                     onRetryPosts={boardPosts.refresh}
+                    hasMorePosts={boardPosts.hasMore}
+                    loadingMorePosts={boardPosts.loadingMore}
+                    loadMorePostsError={boardPosts.loadMoreError}
+                    onLoadMorePosts={boardPosts.loadMore}
                     tutorsLoading={courseTutorsLoading}
                     tutorsError={courseTutorsError}
                     onRetryTutors={() => setCourseTutorRetry((retry) => retry + 1)}
@@ -679,36 +744,42 @@ export default function App() {
             <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'transparent' }}>
                 <PostDetailScreen
                     postId={post.id}
+                    authorId={post.authorId}
                     authorName={post.authorName}
                     authorInitial={post.authorInitial}
                     authorYear={post.authorYear}
                     timestamp={post.timestamp}
                     content={post.content}
                     likes={post.likes}
-                    comments={postComments}
+                    comments={commentsFeed.comments}
+                    totalComments={post.comments}
                     isLiked={post.isLiked}
                     type={post.type}
                     onBack={() => setSelectedPostId(null)}
                     onLikePost={() => boardPosts.toggleLike(post.id)}
                     onLikeComment={async (commentId) => {
-                        const comment = postComments.find(c => c.id === commentId);
+                        const comment = commentsFeed.comments.find(c => c.id === commentId);
                         if (!comment) return false;
                         const success = await boardPosts.toggleCommentLike(commentId, comment.isLiked);
                         if (success) {
-                            setPostComments(prev => prev.map(c => c.id === commentId ? { ...c, isLiked: !c.isLiked, likes: c.likes + (c.isLiked ? -1 : 1) } : c));
+                            commentsFeed.setLike(commentId, !comment.isLiked);
                         }
                         return success;
                     }}
                     onAddComment={async (content, parentId) => {
-                        const added = await boardPosts.addComment(post.id, content, parentId);
-                        if (!added) return false;
-                        const updated = await boardPosts.fetchComments(post.id);
-                        setPostComments(updated);
+                        const commentId = await boardPosts.addComment(post.id, content, parentId);
+                        if (!commentId) return false;
+                        await commentsFeed.loadOne(commentId);
                         return true;
                     }}
                     onViewProfile={handleViewProfile}
-                    commentsError={boardPosts.error}
-                    onRetryComments={async () => setPostComments(await boardPosts.fetchComments(post.id))}
+                    commentsError={commentsFeed.error ?? boardPosts.error}
+                    commentsLoading={commentsFeed.loading}
+                    onRetryComments={commentsFeed.refresh}
+                    hasMoreComments={commentsFeed.hasMore}
+                    loadingMoreComments={commentsFeed.loadingMore}
+                    loadMoreCommentsError={commentsFeed.loadMoreError}
+                    onLoadMoreComments={commentsFeed.loadMore}
                     isDarkMode={theme === 'dark'}
                 />
             </View>
@@ -728,7 +799,7 @@ export default function App() {
         const overlayStyle = { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'transparent' };
 
         // Render settings as base overlay if we're on a nested screen
-        const needsSettingsBase = ['change-password', 'change-email', 'blocked-users', 'privacy-policy', 'terms-of-service'].includes(profileScreen);
+        const needsSettingsBase = ['change-password', 'change-email', 'blocked-users', 'privacy-policy', 'terms-of-service', 'moderation'].includes(profileScreen);
 
         const handleDeleteAccount = async () => {
             const { error } = await auth.deleteAccount();
@@ -756,6 +827,11 @@ export default function App() {
                             onTermsOfService={() => setProfileScreen('terms-of-service')}
                             onThemeChange={handleThemeChange}
                             onLogout={handleLogout}
+                            isModerator={moderation.isModerator}
+                            moderatorError={moderation.accessError}
+                            onModeration={() => setProfileScreen('moderation')}
+                            onRetryModerator={moderation.checkAccess}
+                            push={push}
                         />
                     </View>
                 )}
@@ -777,17 +853,20 @@ export default function App() {
                             initialPrompts={auth.profile?.prompts ?? []}
                             onSave={async (data) => {
                                 let photoUrl = data.profileImage;
-                                if (photoUrl && photoUrl.startsWith('file:')) {
+                                let uploadedPhoto: string | null = null;
+                                if (photoUrl && photoUrl !== studentProfile.photoUrl && !DEMO_MODE) {
                                     try {
                                         if (!currentUserId) throw new Error('Your account is not ready to upload a profile photo.');
+                                        if (!isLocalImageReference(photoUrl)) throw new Error('Choose a new photo from your device.');
                                         photoUrl = await uploadAvatar(currentUserId, photoUrl);
+                                        uploadedPhoto = photoUrl;
                                     } catch (error) {
                                         console.error('Avatar upload failed:', error);
                                         showAlert('Photo upload failed', error instanceof Error ? error.message : 'Please try uploading your photo again.');
                                         return;
                                     }
                                 }
-                                const { error } = await auth.updateProfile({
+                                const { error, saved } = await auth.updateProfile({
                                     name: data.name,
                                     pronouns: data.pronouns,
                                     gender: data.gender,
@@ -799,10 +878,21 @@ export default function App() {
                                     photoUrl,
                                     prompts: data.prompts,
                                 });
-                                if (error) {
-                                    showAlert('Error', error);
+                                if (error && !saved) {
+                                    showAlert('Profile update not confirmed', uploadedPhoto
+                                        ? `${error} Reload before retrying. The uploaded file may remain until account deletion.`
+                                        : error);
                                     return;
                                 }
+                                if (uploadedPhoto && currentUserId && studentProfile.photoUrl) {
+                                    try {
+                                        await removeOwnedAvatar(currentUserId, studentProfile.photoUrl);
+                                    } catch (cleanupError) {
+                                        console.error('Remove previous profile photo error:', cleanupError);
+                                        showAlert('Photo updated', 'Your profile was saved, but the previous photo could not be removed.');
+                                    }
+                                }
+                                if (error) showAlert('Profile saved', error);
                                 setProfileScreen('main');
                             }}
                             isDarkMode={theme === 'dark'}
@@ -818,6 +908,78 @@ export default function App() {
                             isTutor={isTutor}
                             onSave={(newCourses) => courses.setAllStudyingCourses(newCourses)}
                             onSaveTutoring={(newCourses, proofUris) => courses.setAllTutoringCourses(newCourses, proofUris)}
+                            isDarkMode={theme === 'dark'}
+                        />
+                    </View>
+                )}
+                {profileScreen === 'become-tutor-courses' && (
+                    <View style={overlayStyle}>
+                        <TutorCourseApplicationScreen
+                            initialCourses={tutorApplicationCourses}
+                            onBack={() => setProfileScreen('main')}
+                            onContinue={(selected) => {
+                                setTutorApplicationCourses(selected);
+                                setProfileScreen('become-tutor-proof');
+                            }}
+                            isDarkMode={theme === 'dark'}
+                        />
+                    </View>
+                )}
+                {profileScreen === 'become-tutor-proof' && (
+                    <View style={overlayStyle}>
+                        <TutorProofUploadScreen
+                            courses={tutorApplicationCourses}
+                            initialProofs={tutorApplicationProofs}
+                            onProofsChange={setTutorApplicationProofs}
+                            onBack={() => setProfileScreen('become-tutor-courses')}
+                            onContinue={(proofs) => {
+                                setTutorApplicationProofs(proofs);
+                                setProfileScreen('become-tutor-pricing');
+                            }}
+                        />
+                    </View>
+                )}
+                {profileScreen === 'become-tutor-pricing' && (
+                    <View style={overlayStyle}>
+                        <TutorPricingSetupScreen
+                            courses={tutorApplicationCourses}
+                            submitting={submittingTutorApplication}
+                            onBack={() => setProfileScreen('become-tutor-proof')}
+                            onContinue={async (prices, sessionType) => {
+                                if (submittingTutorApplication) return;
+                                setSubmittingTutorApplication(true);
+                                try {
+                                    const result = await auth.activateTutor(tutorApplicationCourses.map((code) => ({
+                                        courseCode: code,
+                                        proofUrl: tutorApplicationProofs[code] ?? '',
+                                        groupPrice: prices[code].group,
+                                        individualPrice: prices[code].individual,
+                                        sessionType,
+                                    })));
+                                    if (result.error) {
+                                        showAlert('Could not complete tutor setup', result.error);
+                                        return;
+                                    }
+                                    if (DEMO_MODE) {
+                                        await courses.setAllTutoringCourses(tutorApplicationCourses);
+                                        const first = prices[tutorApplicationCourses[0]];
+                                        await courses.saveTutoringPricing({
+                                            applyToAll: true,
+                                            globalGroupPrice: first.group,
+                                            globalIndividualPrice: first.individual,
+                                            perCoursePricing: prices,
+                                            sessionType,
+                                        });
+                                    } else {
+                                        await courses.refresh();
+                                    }
+                                    setProfileScreen('main');
+                                    setActiveTutorTab('profile');
+                                    setUserRole('tutor');
+                                } finally {
+                                    setSubmittingTutorApplication(false);
+                                }
+                            }}
                             isDarkMode={theme === 'dark'}
                         />
                     </View>
@@ -866,6 +1028,27 @@ export default function App() {
                             onTermsOfService={() => setProfileScreen('terms-of-service')}
                             onThemeChange={handleThemeChange}
                             onLogout={handleLogout}
+                            isModerator={moderation.isModerator}
+                            moderatorError={moderation.accessError}
+                            onModeration={() => setProfileScreen('moderation')}
+                            onRetryModerator={moderation.checkAccess}
+                            push={push}
+                        />
+                    </View>
+                )}
+                {profileScreen === 'moderation' && (
+                    <View style={overlayStyle}>
+                        <ModerationScreen
+                            reports={moderation.reports}
+                            loading={moderation.loading}
+                            loadingMore={moderation.loadingMore}
+                            error={moderation.error}
+                            hasMore={moderation.hasMore}
+                            onBack={() => setProfileScreen('settings')}
+                            onRefresh={moderation.refresh}
+                            onLoadMore={moderation.loadMore}
+                            onResolve={moderation.resolve}
+                            isDarkMode={theme === 'dark'}
                         />
                     </View>
                 )}
@@ -1013,6 +1196,10 @@ export default function App() {
                     error={chat.error}
                     loadingMessages={chat.loadingMessages}
                     onRetry={() => chat.fetchMessages(selectedConversationId)}
+                    hasOlderMessages={chat.historyByConversation[selectedConversationId]?.hasMore}
+                    loadingOlderMessages={chat.historyByConversation[selectedConversationId]?.loadingMore}
+                    olderMessagesError={chat.historyByConversation[selectedConversationId]?.error}
+                    onLoadOlderMessages={() => chat.loadOlderMessages(selectedConversationId)}
                     isTutorView={false}
                     isDarkMode={theme === 'dark'}
                 />
@@ -1058,6 +1245,10 @@ export default function App() {
                             classmatesFeed.refresh();
                             connections.refresh();
                         }}
+                        hasMore={classmatesFeed.hasMore}
+                        loadingMore={classmatesFeed.loadingMore}
+                        loadMoreError={classmatesFeed.loadMoreError}
+                        onLoadMore={classmatesFeed.loadMore}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -1077,6 +1268,10 @@ export default function App() {
                         loading={chat.loading}
                         error={chat.error}
                         onRetry={chat.refreshConversations}
+                        hasMore={chat.hasMoreConversations}
+                        loadingMore={chat.loadingMoreConversations}
+                        loadMoreError={chat.conversationPageError}
+                        onLoadMore={chat.loadMoreConversations}
                         isDarkMode={theme === 'dark'}
                     />
                 );
@@ -1085,6 +1280,11 @@ export default function App() {
                 return (
                     <ActivityScreen
                         activities={activities}
+                        unreadCount={activityFeed.unreadCount}
+                        hasMore={activityFeed.hasMore}
+                        loadingMore={activityFeed.loadingMore}
+                        loadMoreError={activityFeed.loadMoreError}
+                        onLoadMore={activityFeed.loadMore}
                         onAcceptConnection={async (id) => {
                             const activity = activities.find(a => a.id === id);
                             if (activity?.referenceId) {
@@ -1146,6 +1346,17 @@ export default function App() {
                         onEditProfile={() => setProfileScreen('edit-profile')}
                         onMyCourses={() => setProfileScreen('my-courses')}
                         onConnections={() => setProfileScreen('connections')}
+                        isTutor={auth.profile?.is_tutor ?? false}
+                        onTutorMode={() => {
+                            if (auth.profile?.is_tutor) {
+                                setActiveTutorTab('profile');
+                                setUserRole('tutor');
+                            } else {
+                                setTutorApplicationCourses([]);
+                                setTutorApplicationProofs({});
+                                setProfileScreen('become-tutor-courses');
+                            }
+                        }}
                         onSettings={() => setProfileScreen('settings')}
                         onLogout={handleLogout}
                         isDarkMode={theme === 'dark'}
@@ -1356,7 +1567,7 @@ export default function App() {
 
                 <FadeTransition isVisible={onboardingScreen === 'tutor-proof-upload'} zIndex={9}>
                     <TutorProofUploadScreen
-                        courses={onboardingTutorCourses.length > 0 ? onboardingTutorCourses : onboardingCourses}
+                        courses={onboardingTutorCourses}
                         onBack={() => setOnboardingScreen('tutor-course-application')}
                         onContinue={(proofs) => {
                             setOnboardingTutorProofs(proofs);
@@ -1367,7 +1578,7 @@ export default function App() {
 
                 <FadeTransition isVisible={onboardingScreen === 'tutor-pricing-setup'} zIndex={10}>
                     <TutorPricingSetupScreen
-                        courses={onboardingTutorCourses.length > 0 ? onboardingTutorCourses : onboardingCourses}
+                        courses={onboardingTutorCourses}
                         onBack={() => setOnboardingScreen('tutor-proof-upload')}
                         onContinue={(pricing, sessionType) => {
                             setOnboardingTutorPricing({ prices: pricing, sessionType });
@@ -1391,7 +1602,7 @@ export default function App() {
                                     showAlert('Photo upload failed', error instanceof Error ? error.message : 'Please try uploading your photo again.');
                                     return;
                                 }
-                                const tutorCourseData = (onboardingTutorCourses.length > 0 ? onboardingTutorCourses : onboardingCourses).map((code) => {
+                                const tutorCourseData = onboardingTutorCourses.map((code) => {
                                     const pricing = onboardingTutorPricing?.prices?.[code] || { group: 6, individual: 20 };
                                     return {
                                         courseCode: code,
@@ -1467,7 +1678,7 @@ export default function App() {
                                                 }
                                                 setActiveTutorTab(tab);
                                             }}
-                                            unreadCount={conversations.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0)}
+                                            unreadCount={chat.unreadCount}
                                             isDarkMode={theme === 'dark'}
                                         />
                                     </>
@@ -1494,8 +1705,8 @@ export default function App() {
                                                 }
                                                 setSocialActiveTab(tab);
                                             }}
-                                            unreadMessages={conversations.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0)}
-                                            unreadActivity={activities.filter(a => a.isUnread).length}
+                                            unreadMessages={chat.unreadCount}
+                                            unreadActivity={activityFeed.unreadCount}
                                             isDarkMode={theme === 'dark'}
                                         />
                                     </>
@@ -1529,6 +1740,12 @@ export default function App() {
                         handleDisconnectUser(id, selectedProfileData?.name || 'User');
                         handleCloseProfile();
                     }}
+                    isDarkMode={theme === 'dark'}
+                />
+                <ReportUserModal
+                    target={reportTarget}
+                    onClose={() => setReportTarget(null)}
+                    onSubmit={connections.report}
                     isDarkMode={theme === 'dark'}
                 />
             </SafeAreaView>

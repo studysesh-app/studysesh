@@ -188,6 +188,7 @@ export function ProfileBasicsScreen({ onBack, onContinue, isDarkMode = false }: 
                             <TextInput
                                 value={name}
                                 onChangeText={setName}
+                                maxLength={100}
                                 placeholder="Enter your name"
                                 placeholderTextColor="#9ca3af"
                                 className="w-full pl-12 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
@@ -282,6 +283,7 @@ export function ProfileBasicsScreen({ onBack, onContinue, isDarkMode = false }: 
                             <TextInput
                                 value={major}
                                 onChangeText={setMajor}
+                                maxLength={150}
                                 placeholder="e.g. Computer Science, Engineering"
                                 placeholderTextColor="#9ca3af"
                                 className="w-full pl-12 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"

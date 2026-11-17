@@ -16,7 +16,7 @@ interface MyCoursesScreenProps {
     isTutor: boolean;
     onBack: () => void;
     onSave: (courses: string[]) => void | Promise<string | null>;
-    onSaveTutoring?: (courses: string[], proofUris?: Record<string, string>) => void | Promise<string | null>;
+    onSaveTutoring?: (courses: string[], proofFiles?: Record<string, ProofFile>) => void | Promise<string | null>;
     isDarkMode?: boolean;
 }
 
@@ -33,7 +33,7 @@ export function MyCoursesScreen({
     const activeList = activeTabIndex === 0 ? 'studying' : 'tutoring';
     const [coursesStudying, setCoursesStudying] = useState<string[]>(initialCourses);
     const [coursesTutoring, setCoursesTutoring] = useState<string[]>(initialTutoringCourses);
-    const [proofUris, setProofUris] = useState<Record<string, string>>({});
+    const [proofFiles, setProofFiles] = useState<Record<string, ProofFile>>({});
     const [showAddModal, setShowAddModal] = useState(false);
 
     // Tabs for AnimatedTabs (matching CourseDetailScreen pattern exactly)
@@ -77,7 +77,7 @@ export function MyCoursesScreen({
             return;
         }
         if (onSaveTutoring) {
-            const tutoringError = await onSaveTutoring(coursesTutoring, proofUris);
+            const tutoringError = await onSaveTutoring(coursesTutoring, proofFiles);
             if (tutoringError) {
                 showAlert('Could not save tutoring courses', tutoringError);
                 return;
@@ -88,7 +88,7 @@ export function MyCoursesScreen({
     };
 
     const handleProofUpload = (file: ProofFile) => {
-        setProofUris((prev) => ({ ...prev, [file.courseCode]: file.uri }));
+        setProofFiles((prev) => ({ ...prev, [file.courseCode]: file }));
     };
 
     // Swipe gesture handler

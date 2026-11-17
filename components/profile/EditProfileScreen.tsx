@@ -1,4 +1,5 @@
-import { View, Text, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, ScrollView, Dimensions, LayoutAnimation, UIManager, Modal, Animated, PanResponder, Easing, Keyboard, TouchableWithoutFeedback } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Dimensions, LayoutAnimation, UIManager, Modal, Animated, PanResponder, Easing, Keyboard, TouchableWithoutFeedback } from 'react-native';
+import { PrivateAvatar } from '../PrivateAvatar';
 import { ArrowLeft, Camera, User, BookOpen, Eye, X, Plus, Minus, ChevronLeft, Check } from 'lucide-react-native';
 import { useState, useRef, useEffect } from 'react';
 import { showAlert } from '../../lib/alert';
@@ -438,7 +439,15 @@ export function EditProfileScreen({
                                 <View className="relative mb-3">
                                     <View className="w-24 h-24 rounded-full bg-[#fee2e2] items-center justify-center overflow-hidden">
                                         {profileImage ? (
-                                            <Image source={{ uri: profileImage }} className="w-full h-full" resizeMode="cover" />
+                                            <PrivateAvatar
+                                                reference={profileImage}
+                                                style={{ width: '100%', height: '100%' }}
+                                                fallback={({ error, retry }) => error ? (
+                                                    <TouchableOpacity onPress={retry}><Text className="text-red-600 text-xs">Retry photo</Text></TouchableOpacity>
+                                                ) : (
+                                                    <Text className="text-4xl font-semibold text-[#991b1b]">{initial}</Text>
+                                                )}
+                                            />
                                         ) : (
                                             <Text className="text-4xl font-semibold text-[#991b1b]">
                                                 {initial}
@@ -471,6 +480,7 @@ export function EditProfileScreen({
                                     <TextInput
                                         value={name}
                                         onChangeText={setName}
+                                        maxLength={100}
                                         placeholder="Enter your name"
                                         placeholderTextColor="#9ca3af"
                                         className={`w-full pl-12 pr-4 py-3 ${isDarkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-900'} border rounded-xl`}
@@ -566,6 +576,7 @@ export function EditProfileScreen({
                                         ref={programInputRef}
                                         value={program}
                                         onChangeText={setProgram}
+                                        maxLength={150}
                                         placeholder="e.g. Computer Science, Engineering"
                                         placeholderTextColor="#9ca3af"
                                         className={`w-full pl-12 pr-4 py-3 ${isDarkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-900'} border rounded-xl`}

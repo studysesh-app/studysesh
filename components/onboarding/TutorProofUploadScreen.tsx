@@ -12,6 +12,8 @@ interface TutorProofUploadScreenProps {
     courses: string[];
     onBack: () => void;
     onContinue: (proofs: Record<string, string>) => void;
+    initialProofs?: Record<string, string>;
+    onProofsChange?: (proofs: Record<string, string>) => void;
 }
 
 type UploadedFile = {
@@ -21,8 +23,12 @@ type UploadedFile = {
     path: string;
 };
 
-export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorProofUploadScreenProps) {
-    const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+export function TutorProofUploadScreen({ courses, onBack, onContinue, initialProofs = {}, onProofsChange }: TutorProofUploadScreenProps) {
+    const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>(() =>
+        Object.entries(initialProofs).map(([course, path]) => ({
+            course, path, fileName: path.split('/').pop() || 'proof', fileType: '',
+        }))
+    );
     const [selectedCourse, setSelectedCourse] = useState(courses[0] || '');
     const [uploading, setUploading] = useState(false);
 
@@ -56,17 +62,19 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
                 const { data: { user }, error } = await supabase.auth.getUser();
                 if (error) throw error;
                 if (!user) throw new Error('Not authenticated');
-                path = await uploadTutorProof(user.id, selectedCourse, asset.uri);
+                path = await uploadTutorProof(user.id, selectedCourse, asset.uri, asset.mimeType);
             }
-            setUploadedFiles((prev) => [
-                ...prev,
+            const files = [
+                ...uploadedFiles,
                 {
                     course: selectedCourse,
                     fileName: asset.name || path.split('/').pop() || 'proof',
                     fileType: asset.mimeType || 'application/octet-stream',
                     path,
                 },
-            ]);
+            ];
+            setUploadedFiles(files);
+            onProofsChange?.(Object.fromEntries(files.map((file) => [file.course, file.path])));
         } catch (e) {
             console.error('Proof upload error:', e);
             showAlert('Upload failed', e instanceof Error ? e.message : 'Could not upload the file. Please try again.');
@@ -77,16 +85,23 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
 
     const removeFile = async (index: number) => {
         const file = uploadedFiles[index];
-        if (!file) return;
-        if (!DEMO_MODE && file.path) {
-            const { error } = await supabase.storage.from('proofs').remove([file.path]);
-            if (error) {
-                console.error('Remove tutor proof error:', error);
-                showAlert('Could not remove proof', error.message);
-                return;
+        if (!file || uploading) return;
+        setUploading(true);
+        try {
+            if (!DEMO_MODE && file.path) {
+                const { error } = await supabase.storage.from('proofs').remove([file.path]);
+                if (error) {
+                    console.error('Remove tutor proof error:', error);
+                    showAlert('Could not remove proof', error.message);
+                    return;
+                }
             }
+            const files = uploadedFiles.filter((_, i) => i !== index);
+            setUploadedFiles(files);
+            onProofsChange?.(Object.fromEntries(files.map((item) => [item.course, item.path])));
+        } finally {
+            setUploading(false);
         }
-        setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
     };
 
     const handleContinue = () => {
@@ -108,7 +123,7 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
         <View className="flex-1 bg-white dark:bg-gray-900">
             <ScrollView className="flex-1 px-4 pt-6">
                 <View className="flex-row items-center mb-6 relative">
-                    <TouchableOpacity onPress={onBack} className="absolute left-0 z-10 p-2 -ml-2">
+                    <TouchableOpacity onPress={onBack} disabled={uploading} className="absolute left-0 z-10 p-2 -ml-2">
                         <ArrowLeft size={24} color="#000" />
                     </TouchableOpacity>
                     <Text className="flex-1 text-center text-2xl font-bold text-gray-900 dark:text-white">
@@ -236,6 +251,7 @@ export function TutorProofUploadScreen({ courses, onBack, onContinue }: TutorPro
                                     </View>
                                     <TouchableOpacity
                                         onPress={() => removeFile(index)}
+                                        disabled={uploading}
                                         className="p-2"
                                     >
                                         <X size={16} color="#9ca3af" />

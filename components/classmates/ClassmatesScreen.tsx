@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { useState, useRef } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Carousel, { ICarouselInstance } from 'react-native-reanimated-carousel';
@@ -33,6 +33,10 @@ interface ClassmatesScreenProps {
     loading?: boolean;
     error?: string | null;
     onRetry?: () => void;
+    hasMore?: boolean;
+    loadingMore?: boolean;
+    loadMoreError?: string | null;
+    onLoadMore?: () => void;
 }
 
 export function ClassmatesScreen({
@@ -49,9 +53,23 @@ export function ClassmatesScreen({
     loading = false,
     error = null,
     onRetry,
+    hasMore = false,
+    loadingMore = false,
+    loadMoreError = null,
+    onLoadMore,
 }: ClassmatesScreenProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const carouselRef = useRef<ICarouselInstance>(null);
+    const loadMoreControl = hasMore && onLoadMore ? (
+        <View style={styles.loadMore}>
+            {loadMoreError && <Text style={styles.loadMoreError}>{loadMoreError}</Text>}
+            <TouchableOpacity onPress={onLoadMore} disabled={loadingMore} accessibilityRole="button">
+                <Text style={styles.loadMoreText}>
+                    {loadingMore ? 'Loading...' : loadMoreError ? 'Try loading more' : 'Load more classmates'}
+                </Text>
+            </TouchableOpacity>
+        </View>
+    ) : null;
 
     const handleProfileTap = (profile: ClassmateProfile) => {
         onViewProfile?.(profile);
@@ -112,6 +130,7 @@ export function ClassmatesScreen({
                     <Text style={[styles.emptySubtitle, isDarkMode && styles.emptySubtitleDark]}>
                         Check back later to discover students in your courses
                     </Text>
+                    {loadMoreControl}
                 </View>
             </View>
         );
@@ -150,6 +169,7 @@ export function ClassmatesScreen({
                     </View>
                 )}
             />
+            {currentIndex >= profiles.length - 2 && loadMoreControl}
         </GestureHandlerRootView>
     );
 }
@@ -165,6 +185,24 @@ const styles = StyleSheet.create({
     },
     containerDark: {
         backgroundColor: '#111827',
+    },
+    loadMore: {
+        position: 'absolute',
+        bottom: 115,
+        alignSelf: 'center',
+        alignItems: 'center',
+        padding: 10,
+        borderRadius: 12,
+        backgroundColor: '#fff',
+    },
+    loadMoreText: {
+        color: '#b91c1c',
+        fontWeight: '600',
+    },
+    loadMoreError: {
+        color: '#991b1b',
+        textAlign: 'center',
+        marginBottom: 4,
     },
     cardWrapper: {
         flex: 1,

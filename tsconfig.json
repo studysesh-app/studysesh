@@ -5,6 +5,13 @@
   },
   "exclude": [
     "node_modules",
-    "_source"
+    "_source",
+    "_figma-social",
+    "animation",
+    "archive",
+    "backup",
+    "supabase",
+    "dist",
+    "tests"
   ]
 }

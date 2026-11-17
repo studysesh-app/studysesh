@@ -1,9 +1,10 @@
-import { View, Text, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Dimensions, Switch } from 'react-native';
 import { ArrowLeft, ChevronRight } from 'lucide-react-native';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
-import { showConfirm } from '../../lib/alert';
+import { showAlert, showConfirm } from '../../lib/alert';
 import { openSupportEmail } from '../../lib/support';
+import type { PushPreferences } from '../../hooks/usePushNotifications';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -19,6 +20,20 @@ interface SettingsScreenProps {
     onTermsOfService: () => void;
     onThemeChange: (theme: 'light' | 'dark') => void;
     onLogout: () => void;
+    isModerator?: boolean;
+    moderatorError?: string | null;
+    onModeration?: () => void;
+    onRetryModerator?: () => void;
+    push?: {
+        available: boolean;
+        preferences: PushPreferences;
+        loading: boolean;
+        ready: boolean;
+        saving: boolean;
+        error: string | null;
+        refresh: () => void;
+        save: (preferences: PushPreferences) => Promise<string | null>;
+    };
 }
 
 export function SettingsScreen({
@@ -33,6 +48,11 @@ export function SettingsScreen({
     onTermsOfService,
     onThemeChange,
     onLogout,
+    isModerator = false,
+    moderatorError = null,
+    onModeration,
+    onRetryModerator,
+    push,
 }: SettingsScreenProps) {
     // Swipe gesture handler
     const translateX = useSharedValue(0);
@@ -150,13 +170,67 @@ export function SettingsScreen({
                                     <Text className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'} mb-1`}>
                                         Notifications
                                     </Text>
-                                    <Text className="text-sm text-gray-500">
-                                        Push notifications are not available yet. Check Activity and Messages for updates.
-                                    </Text>
+                                    {push?.available ? (
+                                        <>
+                                            <Text className="text-sm text-gray-500">
+                                                Preferences apply to your account. Each device also needs notification permission.
+                                            </Text>
+                                            {push.error && (
+                                                <TouchableOpacity onPress={push.refresh}>
+                                                    <Text className="text-red-600 text-sm">{push.error} Tap to retry.</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            {([
+                                                ['messages', 'Messages'],
+                                                ['connections', 'Connection requests'],
+                                                ['board', 'Board activity'],
+                                            ] as const).map(([key, label]) => (
+                                                <View key={key} className="flex-row items-center justify-between">
+                                                    <Text className={`text-sm ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{label}</Text>
+                                                    <Switch
+                                                        accessibilityLabel={`${label} notifications`}
+                                                        value={push.preferences[key]}
+                                                        disabled={push.loading || !push.ready || push.saving}
+                                                        trackColor={{ true: '#db2321', false: '#9ca3af' }}
+                                                        onValueChange={async (value) => {
+                                                            const failure = await push.save({ ...push.preferences, [key]: value });
+                                                            if (failure) showAlert('Notification preferences', failure);
+                                                        }}
+                                                    />
+                                                </View>
+                                            ))}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Text className="text-sm text-gray-500">
+                                                Push notifications are not available on this build. Check Activity and Messages for updates.
+                                            </Text>
+                                            {push?.error && <Text className="text-red-600 text-sm">{push.error}</Text>}
+                                        </>
+                                    )}
                                 </View>
                             </View>
                         </View>
 
+
+                        {(isModerator || moderatorError) && (
+                            <View className="mb-8">
+                                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                                    Moderation
+                                </Text>
+                                {isModerator && onModeration && (
+                                    <TouchableOpacity onPress={onModeration} className={`p-4 border rounded-2xl flex-row items-center justify-between ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                                        <Text className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Review Reports</Text>
+                                        <ChevronRight size={20} color="#9ca3af" />
+                                    </TouchableOpacity>
+                                )}
+                                {moderatorError && (
+                                    <TouchableOpacity onPress={onRetryModerator} className="py-2">
+                                        <Text className="text-red-600 text-sm">Could not check moderation access. Tap to retry.</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        )}
 
                         {/* Privacy Section */}
                         <View className="mb-8">

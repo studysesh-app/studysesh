@@ -10,6 +10,8 @@ interface StudentProfileScreenProps {
     onEditProfile: () => void;
     onMyCourses: () => void;
     onConnections?: () => void;
+    onTutorMode: () => void;
+    isTutor?: boolean;
     onSettings: () => void;
     onLogout: () => void;
     isDarkMode?: boolean;
@@ -23,6 +25,8 @@ export function StudentProfileScreen({
     onEditProfile,
     onMyCourses,
     onConnections,
+    onTutorMode,
+    isTutor = false,
     onSettings,
     onLogout,
     isDarkMode = false
@@ -31,6 +35,7 @@ export function StudentProfileScreen({
         { icon: Users, label: 'Connections', onPress: onConnections, badge: connectionsCount > 0 ? connectionsCount : undefined },
         { icon: User, label: 'Edit Profile', onPress: onEditProfile },
         { icon: BookOpen, label: 'My Courses', onPress: onMyCourses },
+        { icon: BookOpen, label: isTutor ? 'Switch to Tutor' : 'Become a Tutor', onPress: onTutorMode },
         { icon: Settings, label: 'Settings', onPress: onSettings },
     ];
 

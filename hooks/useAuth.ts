@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { DEMO_MODE } from '../lib/demo';
 import type { Session, User } from '@supabase/supabase-js';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 
 const ALLOWED_EMAIL_DOMAIN = '@cmail.carleton.ca';
 
@@ -35,11 +36,20 @@ interface UseAuthReturn {
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   createProfile: (profileData: CreateProfileData) => Promise<{ error: string | null }>;
+  activateTutor: (courses: TutorActivationCourse[]) => Promise<{ error: string | null }>;
   fetchProfile: () => Promise<UserProfile | null>;
-  updateProfile: (updates: UpdateProfileData) => Promise<{ error: string | null }>;
+  updateProfile: (updates: UpdateProfileData) => Promise<{ error: string | null; saved?: boolean; unknown?: boolean }>;
   updatePassword: (currentPassword: string, newPassword: string) => Promise<{ error: string | null }>;
   updateEmail: (currentPassword: string, newEmail: string) => Promise<{ error: string | null }>;
   deleteAccount: () => Promise<{ error: string | null }>;
+}
+
+interface TutorActivationCourse {
+  courseCode: string;
+  proofUrl: string;
+  groupPrice: number;
+  individualPrice: number;
+  sessionType: 'online' | 'in-person' | 'both';
 }
 
 interface UpdateProfileData {
@@ -346,22 +356,33 @@ export function useAuth(): UseAuthReturn {
       return demoProfileStore;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user?.email) {
+      console.error('Fetch authenticated profile user error:', userError ?? 'User email is unavailable');
+      return null;
+    }
 
     const { data, error } = await supabase
       .from('users')
-      .select('*')
+      .select('id, name, pronouns, gender, year, degree_level, major, bio, photo_url, status, profile_visibility, is_tutor, theme')
       .eq('id', user.id)
       .maybeSingle();
 
-    if (error || !data) return null;
-    const profile = data as UserProfile;
-    const { data: promptRows } = await supabase
+    if (error) {
+      console.error('Fetch profile error:', error);
+      return null;
+    }
+    if (!data) return null;
+    const profile = { ...data, email: user.email } as UserProfile;
+    const { data: promptRows, error: promptError } = await supabase
       .from('user_prompts')
       .select('prompt, answer')
       .eq('user_id', user.id)
       .order('sort_order');
+    if (promptError) {
+      console.error('Fetch profile prompts error:', promptError);
+      return null;
+    }
     profile.prompts = (promptRows ?? []).map((p) => ({ prompt: p.prompt, answer: p.answer }));
     return profile;
   }, []);
@@ -424,6 +445,7 @@ export function useAuth(): UseAuthReturn {
 
       // Refresh profile
       const newProfile = await fetchProfile();
+      if (!newProfile) return { error: 'Your profile was saved, but could not be refreshed. Please sign in again.' };
       setProfile(newProfile);
 
       return { error: null };
@@ -433,8 +455,36 @@ export function useAuth(): UseAuthReturn {
     }
   }, [fetchProfile, session]);
 
+  const activateTutor = useCallback(async (courses: TutorActivationCourse[]): Promise<{ error: string | null }> => {
+    if (courses.length === 0) return { error: 'Select at least one tutoring course.' };
+    if (DEMO_MODE) {
+      if (!demoProfileStore) return { error: 'Your profile is not available.' };
+      demoProfileStore = { ...demoProfileStore, is_tutor: true };
+      setProfile(demoProfileStore);
+      return { error: null };
+    }
+
+    const { error } = await supabase.rpc('activate_tutor', {
+      p_courses: courses.map((course) => ({
+        course_code: course.courseCode,
+        proof_url: course.proofUrl,
+        group_price: course.groupPrice,
+        individual_price: course.individualPrice,
+        session_type: course.sessionType,
+      })),
+    });
+    if (error) {
+      console.error('Activate tutor error:', error);
+      return { error: error.message };
+    }
+    const updatedProfile = await fetchProfile();
+    if (!updatedProfile) return { error: 'Your tutor setup was saved, but your profile could not be refreshed. Sign in again.' };
+    setProfile(updatedProfile);
+    return { error: null };
+  }, [fetchProfile]);
+
   // Update the current user's profile (edit-profile screen)
-  const updateProfile = useCallback(async (updates: UpdateProfileData): Promise<{ error: string | null }> => {
+  const updateProfile = useCallback(async (updates: UpdateProfileData): Promise<{ error: string | null; saved?: boolean; unknown?: boolean }> => {
     if (DEMO_MODE) {
       if (demoProfileStore) {
         demoProfileStore = {
@@ -457,10 +507,7 @@ export function useAuth(): UseAuthReturn {
       return { error: null };
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { error: 'Not authenticated' };
-
-    const patch: Record<string, any> = {};
+    const patch: Record<string, string | string[] | null> = {};
     if (updates.name !== undefined) patch.name = updates.name;
     if (updates.pronouns !== undefined) patch.pronouns = updates.pronouns;
     if (updates.gender !== undefined) patch.gender = updates.gender;
@@ -473,24 +520,30 @@ export function useAuth(): UseAuthReturn {
     if (updates.theme !== undefined) patch.theme = updates.theme;
     if (updates.status !== undefined) patch.status = updates.status;
 
-    if (Object.keys(patch).length > 0) {
-      const { error } = await supabase.from('users').update(patch).eq('id', user.id);
-      if (error) return { error: error.message };
+    let response;
+    try {
+      response = await supabase.rpc('update_profile', {
+        p_updates: patch,
+        p_prompts: updates.prompts ?? null,
+      });
+    } catch (failure) {
+      console.error('Profile update result unknown:', failure);
+      return { error: 'Could not confirm the update. Reload before retrying.', unknown: true };
     }
+    const { error } = response;
+    if (error) return error.code
+      ? { error: error.message }
+      : { error: 'Could not confirm the update. Reload before retrying.', unknown: true };
 
-    if (updates.prompts) {
-      await supabase.from('user_prompts').delete().eq('user_id', user.id);
-      if (updates.prompts.length > 0) {
-        const { error: promptsError } = await supabase.from('user_prompts').insert(
-          updates.prompts.map((p, i) => ({ user_id: user.id, prompt: p.prompt, answer: p.answer, sort_order: i }))
-        );
-        if (promptsError) return { error: promptsError.message };
-      }
+    try {
+      const newProfile = await fetchProfile();
+      if (!newProfile) return { error: 'Your profile was saved, but could not be refreshed. Please reload.', saved: true };
+      setProfile(newProfile);
+      return { error: null };
+    } catch (failure) {
+      console.error('Refresh saved profile failed:', failure);
+      return { error: 'Your profile was saved, but could not be refreshed. Please reload.', saved: true };
     }
-
-    const newProfile = await fetchProfile();
-    setProfile(newProfile);
-    return { error: null };
   }, [fetchProfile]);
 
   // Change password (re-authenticates with the current password first)
@@ -534,13 +587,8 @@ export function useAuth(): UseAuthReturn {
     const { error } = await supabase.auth.updateUser({ email: clean });
     if (error) return { error: error.message };
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { error: profileError } = await supabase.from('users').update({ email: clean }).eq('id', user.id);
-      if (profileError) return { error: profileError.message };
-      const refreshed = await fetchProfile();
-      setProfile(refreshed);
-    }
+    const refreshed = await fetchProfile();
+    if (refreshed) setProfile(refreshed);
     return { error: null };
   }, [session, fetchProfile]);
 
@@ -552,7 +600,19 @@ export function useAuth(): UseAuthReturn {
     }
 
     const { error } = await supabase.functions.invoke('delete-account');
-    if (error) return { error: error.message };
+    if (error) {
+      if (error instanceof FunctionsHttpError) {
+        try {
+          const body: unknown = await error.context.json();
+          if (typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string') {
+            return { error: body.error };
+          }
+        } catch (failure) {
+          console.error('Read account deletion error failed:', failure);
+        }
+      }
+      return { error: error.message };
+    }
 
     await signOut();
     return { error: null };
@@ -570,6 +630,7 @@ export function useAuth(): UseAuthReturn {
     resetPassword,
     signOut,
     createProfile,
+    activateTutor,
     fetchProfile,
     updateProfile,
     updatePassword,

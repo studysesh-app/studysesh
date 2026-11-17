@@ -76,7 +76,7 @@ export function useCourses(userId: string | null) {
                 (courseRows ?? []).map(async (c) => {
                     const counts = await Promise.all([
                         supabase.from('user_courses').select('*', { count: 'exact', head: true }).eq('course_id', c.id),
-                        supabase.from('tutor_courses').select('*', { count: 'exact', head: true }).eq('course_id', c.id),
+                        supabase.rpc('course_tutors', { p_course_id: c.id }, { count: 'exact', head: true }),
                         supabase.from('posts').select('*', { count: 'exact', head: true }).eq('course_id', c.id),
                     ]);
                     const countError = counts.find((result) => result.error)?.error;
@@ -118,7 +118,7 @@ export function useCourses(userId: string | null) {
             return null;
         }
         setError(null);
-        const { data: course, error: courseError } = await supabase.from('courses').select('id').eq('code', code).single();
+        const { data: course, error: courseError } = await supabase.from('courses').select('id').eq('code', code).eq('is_active', true).single();
         if (courseError || !course) {
             const message = courseError?.message ?? `Course ${code} was not found.`;
             setError(message);
@@ -174,7 +174,7 @@ export function useCourses(userId: string | null) {
                 return null;
             }
             setError(null);
-            const { data: course, error: courseError } = await supabase.from('courses').select('id').eq('code', code).single();
+            const { data: course, error: courseError } = await supabase.from('courses').select('id').eq('code', code).eq('is_active', true).single();
             if (courseError || !course) {
                 const message = courseError?.message ?? `Course ${code} was not found.`;
                 setError(message);
@@ -223,9 +223,12 @@ export function useCourses(userId: string | null) {
 
     /** Saves the full tutoring course list, uploading any newly-picked proof files (keyed by course code). */
     const setAllTutoringCourses = useCallback(
-        async (codes: string[], proofUris?: Record<string, string>) => {
+        async (codes: string[], proofFiles?: Record<string, { uri: string; mimeType?: string }>) => {
             if (DEMO_MODE || !userId) {
                 setTutoringCourses(codes);
+                setTutorPricing((prev) => codes.map((code) => prev.find((price) => price.code === code) ?? {
+                    code, groupPrice: 6, individualPrice: 20, sessionType: 'both',
+                }));
                 return null;
             }
             const toAdd = codes.filter((c) => !tutoringCourses.includes(c));
@@ -233,10 +236,10 @@ export function useCourses(userId: string | null) {
 
             for (const code of toAdd) {
                 let proofUrl: string | undefined;
-                const uri = proofUris?.[code];
-                if (uri) {
+                const proof = proofFiles?.[code];
+                if (proof) {
                     try {
-                        proofUrl = await uploadTutorProof(userId, code, uri);
+                        proofUrl = await uploadTutorProof(userId, code, proof.uri, proof.mimeType);
                     } catch (e) {
                         console.error('Proof upload failed:', e);
                         const message = e instanceof Error ? e.message : 'Tutor proof upload failed.';

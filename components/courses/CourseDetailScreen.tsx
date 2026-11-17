@@ -1,7 +1,7 @@
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, TextInput, Dimensions } from 'react-native';
 import { ArrowLeft, Send, MessageCircle, MessageSquare, Heart } from 'lucide-react-native';
 // Missing icons: Image, Link, HelpCircle
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 import { TutorCard } from '../TutorCard';
@@ -14,6 +14,7 @@ type PostType = 'post' | 'question';
 
 interface BoardPost {
     id: string;
+    authorId: string;
     authorName: string;
     authorInitial: string;
     authorYear: string;
@@ -51,6 +52,10 @@ interface CourseDetailScreenProps {
     postsLoading?: boolean;
     postsError?: string | null;
     onRetryPosts?: () => void;
+    hasMorePosts?: boolean;
+    loadingMorePosts?: boolean;
+    loadMorePostsError?: string | null;
+    onLoadMorePosts?: () => void;
     tutorsLoading?: boolean;
     tutorsError?: string | null;
     onRetryTutors?: () => void;
@@ -72,6 +77,10 @@ export function CourseDetailScreen({
     postsLoading = false,
     postsError = null,
     onRetryPosts,
+    hasMorePosts = false,
+    loadingMorePosts = false,
+    loadMorePostsError = null,
+    onLoadMorePosts,
     tutorsLoading = false,
     tutorsError = null,
     onRetryTutors,
@@ -79,6 +88,8 @@ export function CourseDetailScreen({
     const [activeTabIndex, setActiveTabIndex] = useState(0);
     const [newPostContent, setNewPostContent] = useState('');
     const [isQuestion, setIsQuestion] = useState(false);
+    const [posting, setPosting] = useState(false);
+    const postingRef = useRef(false);
 
     // Swipe gesture for back navigation and tab switching
     const translateX = useSharedValue(0);
@@ -154,14 +165,24 @@ export function CourseDetailScreen({
     }));
 
     const handleSubmitPost = async () => {
-        if (!newPostContent.trim()) return;
-        const posted = await onCreatePost(newPostContent.trim(), isQuestion ? 'question' : 'post');
-        if (posted === false) {
-            showAlert('Post not created', 'Check your connection and try again. Your post is still here.');
-            return;
+        if (!newPostContent.trim() || postingRef.current) return;
+        postingRef.current = true;
+        setPosting(true);
+        try {
+            const posted = await onCreatePost(newPostContent.trim(), isQuestion ? 'question' : 'post');
+            if (posted === false) {
+                showAlert('Post not created', 'Check your connection and try again. Your post is still here.');
+                return;
+            }
+            setNewPostContent('');
+            setIsQuestion(false);
+        } catch (error) {
+            console.error('Create post failed:', error);
+            showAlert('Post not created', error instanceof Error ? error.message : 'Please try again. Your post is still here.');
+        } finally {
+            postingRef.current = false;
+            setPosting(false);
         }
-        setNewPostContent('');
-        setIsQuestion(false);
     };
 
     const handlePostPress = (post: BoardPost) => {
@@ -201,6 +222,8 @@ export function CourseDetailScreen({
                     placeholderTextColor={isDarkMode ? '#6b7280' : '#9ca3af'}
                     value={newPostContent}
                     onChangeText={setNewPostContent}
+                    editable={!posting}
+                    maxLength={5000}
                     multiline
                 />
 
@@ -216,6 +239,7 @@ export function CourseDetailScreen({
                                 isDarkMode && isQuestion && { backgroundColor: 'rgba(127, 29, 29, 0.4)', borderColor: '#ef4444' }
                             ]}
                             onPress={() => setIsQuestion(!isQuestion)}
+                            disabled={posting}
                         >
                             {/* <CircleHelp size={16} color={isQuestion ? '#db2321' : '#6b7280'} /> */}
                             <Text style={[
@@ -235,7 +259,7 @@ export function CourseDetailScreen({
                             !newPostContent.trim() && isDarkMode && styles.postButtonDisabledDark
                         ]}
                         onPress={handleSubmitPost}
-                        disabled={!newPostContent.trim()}
+                        disabled={posting || !newPostContent.trim()}
                     >
                         <Send size={16} color="#fff" />
                         <Text style={styles.postButtonText}>Post</Text>
@@ -245,7 +269,12 @@ export function CourseDetailScreen({
 
             {/* Posts List */}
             <View style={styles.postsList}>
-                {posts.length === 0 ? (
+                {onRetryPosts && (
+                    <TouchableOpacity onPress={onRetryPosts} style={{ alignSelf: 'flex-end', padding: 10 }}>
+                        <Text style={{ color: '#db2321', fontWeight: '600' }}>Refresh board</Text>
+                    </TouchableOpacity>
+                )}
+                {posts.length === 0 && !postsLoading && !postsError ? (
                     <View style={styles.emptyState}>
                         <MessageSquare size={48} color="#d1d5db" />
                         <Text style={[styles.emptyTitle, isDarkMode && styles.textDark]}>No posts yet</Text>
@@ -278,7 +307,7 @@ export function CourseDetailScreen({
                                 style={styles.postAuthor}
                                 onPress={(e) => {
                                     e.stopPropagation(); // Prevent opening post detail
-                                    if (onViewProfile) onViewProfile(post.authorName);
+                                    if (onViewProfile) onViewProfile(post.authorId);
                                 }}
                             >
                                 <View style={styles.authorAvatar}>
@@ -324,6 +353,16 @@ export function CourseDetailScreen({
                             </View>
                         </TouchableOpacity>
                     ))
+                )}
+                {hasMorePosts && onLoadMorePosts && (
+                    <View style={{ alignItems: 'center', padding: 16 }}>
+                        {loadMorePostsError && <Text style={{ color: '#b91c1c' }}>{loadMorePostsError}</Text>}
+                        <TouchableOpacity onPress={onLoadMorePosts} disabled={loadingMorePosts} style={{ padding: 12 }}>
+                            <Text style={{ color: '#db2321', fontWeight: '600' }}>
+                                {loadingMorePosts ? 'Loading...' : loadMorePostsError ? 'Try loading more' : 'Load more posts'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
                 )}
             </View>
         </View >

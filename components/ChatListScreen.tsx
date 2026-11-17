@@ -22,6 +22,10 @@ interface ChatListScreenProps {
     loading?: boolean;
     error?: string | null;
     onRetry?: () => void;
+    hasMore?: boolean;
+    loadingMore?: boolean;
+    loadMoreError?: string | null;
+    onLoadMore?: () => void;
 }
 
 export function ChatListScreen({
@@ -33,6 +37,10 @@ export function ChatListScreen({
     loading = false,
     error = null,
     onRetry,
+    hasMore = false,
+    loadingMore = false,
+    loadMoreError = null,
+    onLoadMore,
 }: ChatListScreenProps) {
     const [filterActive, setFilterActive] = useState(false);
 
@@ -112,6 +120,16 @@ export function ChatListScreen({
                                 isDarkMode={isDarkMode}
                             />
                         ))}
+                    </View>
+                )}
+                {hasMore && onLoadMore && !error && (
+                    <View style={{ alignItems: 'center', padding: 16 }}>
+                        {loadMoreError && <Text style={{ color: '#b91c1c', textAlign: 'center' }}>{loadMoreError}</Text>}
+                        <TouchableOpacity onPress={onLoadMore} disabled={loadingMore} style={{ padding: 12 }}>
+                            <Text style={{ color: '#db2321', fontWeight: '600' }}>
+                                {loadingMore ? 'Loading...' : loadMoreError ? 'Try loading more' : 'Load more conversations'}
+                            </Text>
+                        </TouchableOpacity>
                     </View>
                 )}
             </ScrollView>

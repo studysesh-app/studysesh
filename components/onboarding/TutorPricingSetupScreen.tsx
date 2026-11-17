@@ -14,9 +14,10 @@ interface TutorPricingSetupScreenProps {
         sessionType: 'online' | 'in-person' | 'both',
     ) => void;
     isDarkMode?: boolean;
+    submitting?: boolean;
 }
 
-export function TutorPricingSetupScreen({ courses, onBack, onContinue, isDarkMode = false }: TutorPricingSetupScreenProps) {
+export function TutorPricingSetupScreen({ courses, onBack, onContinue, isDarkMode = false, submitting = false }: TutorPricingSetupScreenProps) {
     // Session Type State
     const sessionTypes: Array<'online' | 'in-person' | 'both'> = ['online', 'in-person', 'both'];
     const [sessionTypeIndex, setSessionTypeIndex] = useState(2); // Default 'both'
@@ -68,7 +69,7 @@ export function TutorPricingSetupScreen({ courses, onBack, onContinue, isDarkMod
         <View className="flex-1 bg-white dark:bg-gray-900">
             <ScrollView className="flex-1 px-4 pt-6">
                 <View className="flex-row items-center mb-6 relative">
-                    <TouchableOpacity onPress={onBack} className="absolute left-0 z-10 p-2 -ml-2">
+                    <TouchableOpacity onPress={onBack} disabled={submitting} className="absolute left-0 z-10 p-2 -ml-2">
                         <ArrowLeft size={24} color={isDarkMode ? '#fff' : '#000'} />
                     </TouchableOpacity>
                     <Text className="flex-1 text-center text-2xl font-bold text-gray-900 dark:text-white" style={{ color: isDarkMode ? '#fff' : '#111827' }}>
@@ -229,10 +230,11 @@ export function TutorPricingSetupScreen({ courses, onBack, onContinue, isDarkMod
             <View className="p-4 border-t border-gray-200 dark:border-gray-800">
                 <TouchableOpacity
                     onPress={handleContinue}
-                    className="w-full py-4 bg-red-600 rounded-full shadow-sm"
+                    disabled={submitting}
+                    className={`w-full py-4 rounded-full shadow-sm ${submitting ? 'bg-gray-300' : 'bg-red-600'}`}
                 >
                     <Text className="text-center text-white text-base font-semibold">
-                        Continue
+                        {submitting ? 'Saving...' : 'Continue'}
                     </Text>
                 </TouchableOpacity>
             </View>
