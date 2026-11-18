@@ -74,6 +74,7 @@ import { TutorPricingSetupScreen } from '../components/onboarding/TutorPricingSe
 import { TutorOnboardingSuccessScreen } from '../components/onboarding/TutorOnboardingSuccessScreen';
 import { TutorProofUploadScreen } from '../components/onboarding/TutorProofUploadScreen';
 import { ForgotPasswordScreen } from '../components/onboarding/ForgotPasswordScreen';
+import { SetNewPasswordScreen } from '../components/onboarding/SetNewPasswordScreen';
 import { StudentProfileScreen } from '../components/StudentProfileScreen';
 import { StudentProfileModal } from '../components/classmates/StudentProfileModal';
 import { ReportUserModal } from '../components/classmates/ReportUserModal';
@@ -115,7 +116,8 @@ type OnboardingScreen =
     | 'tutor-proof-upload'
     | 'tutor-pricing-setup'
     | 'tutor-success'
-    | 'forgot-password';
+    | 'forgot-password'
+    | 'set-new-password';
 
 export default function App() {
     // Auth hook
@@ -136,18 +138,26 @@ export default function App() {
     const [onboardingTutorProofs, setOnboardingTutorProofs] = useState<Record<string, string>>({});
 
     const activeAccount = useRef<string | null>(null);
-    // Auto-login: choose the initial mode once per account.
+    // Auto-login: choose the initial mode once per account, unless a password recovery flow is active.
     useLayoutEffect(() => {
+        if (auth.isPasswordRecovery) {
+            setIsOnboarding(true);
+            setOnboardingScreen('set-new-password');
+            return;
+        }
         if (!auth.loading && auth.session && auth.profile) {
             if (activeAccount.current !== auth.profile.id) {
                 activeAccount.current = auth.profile.id;
                 setUserRole(auth.profile.is_tutor ? 'tutor' : 'student');
             }
             setIsOnboarding(false);
+        } else if (!auth.loading && auth.session && !auth.profile) {
+            setOnboardingScreen((prev) => (prev === 'set-new-password' ? 'profile-basics' : prev));
         } else if (!auth.loading && !auth.session) {
             activeAccount.current = null;
+            setOnboardingScreen((prev) => (prev === 'set-new-password' ? 'welcome' : prev));
         }
-    }, [auth.loading, auth.session, auth.profile]);
+    }, [auth.loading, auth.session, auth.profile, auth.isPasswordRecovery]);
 
     const currentUserId = auth.profile?.id ?? null;
     const courses = useCourses(currentUserId);
@@ -1471,6 +1481,21 @@ export default function App() {
                             }
                             showAlert('Email Sent', 'Check your email for the password reset link.');
                             setOnboardingScreen('sign-in');
+                        }}
+                    />
+                </FadeTransition>
+
+                <FadeTransition isVisible={onboardingScreen === 'set-new-password'} zIndex={15}>
+                    <SetNewPasswordScreen
+                        onCancel={async () => {
+                            await auth.cancelPasswordRecovery();
+                            setOnboardingScreen('sign-in');
+                        }}
+                        onSubmit={async (newPassword) => {
+                            const { error } = await auth.completePasswordRecovery(newPassword);
+                            if (error) return error;
+                            showAlert('Password Updated', 'Your password has been updated.');
+                            return null;
                         }}
                     />
                 </FadeTransition>

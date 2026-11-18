@@ -42,9 +42,10 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
 
     // Search courses from Supabase
     useEffect(() => {
-        if (searchQuery.length < 2) {
+        if (searchQuery.trim().length < 2) {
             setResults([]);
             setSearchError(null);
+            setSearching(false);
             return;
         }
 
@@ -89,6 +90,7 @@ export function CourseInputModal({ isOpen, onClose, onAdd, requiresProof, onProo
         return () => {
             active = false;
             clearTimeout(timer);
+            setSearching(false);
         };
     }, [searchQuery, retrySearch]);
 

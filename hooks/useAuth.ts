@@ -1,10 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Platform } from 'react-native';
+import * as Linking from 'expo-linking';
 import { supabase } from '../lib/supabase';
 import { DEMO_MODE } from '../lib/demo';
 import type { Session, User } from '@supabase/supabase-js';
 import { FunctionsHttpError } from '@supabase/supabase-js';
 
 const ALLOWED_EMAIL_DOMAIN = '@cmail.carleton.ca';
+
+function getPasswordResetRedirectUrl(): string | undefined {
+  if (Platform.OS === 'web') {
+    if (typeof window === 'undefined') return undefined;
+    return new URL(window.location.pathname, window.location.origin).toString();
+  }
+  return Linking.createURL('/');
+}
 
 interface UserProfile {
   id: string;
@@ -29,11 +39,14 @@ interface UseAuthReturn {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  isPasswordRecovery: boolean;
   signUp: (email: string, password: string) => Promise<{ error: string | null; needsVerification: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null; needsProfile: boolean }>;
   verifyOtp: (email: string, token: string) => Promise<{ error: string | null }>;
   resendOtp: (email: string) => Promise<{ error: string | null }>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
+  completePasswordRecovery: (newPassword: string) => Promise<{ error: string | null }>;
+  cancelPasswordRecovery: () => Promise<void>;
   signOut: () => Promise<void>;
   createProfile: (profileData: CreateProfileData) => Promise<{ error: string | null }>;
   activateTutor: (courses: TutorActivationCourse[]) => Promise<{ error: string | null }>;
@@ -143,6 +156,7 @@ export function useAuth(): UseAuthReturn {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
   const signingOutRef = useRef(false);
 
   // Listen for auth state changes
@@ -153,36 +167,88 @@ export function useAuth(): UseAuthReturn {
       return;
     }
 
-    // Get initial session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (signingOutRef.current) return;
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        setProfile(await fetchProfile());
-      }
-      setLoading(false);
-    });
-
-    // Listen for changes
+    // Listen for changes (registered before getSession so initial PASSWORD_RECOVERY events aren't missed).
+    // Defer fetchProfile() via setTimeout so it runs outside GoTrue's internal auth lock and cannot deadlock supabase-js queries.
+    let active = true;
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      (event, session) => {
         if (signingOutRef.current) {
           if (!session) signingOutRef.current = false;
           return;
         }
+        if (event === 'PASSWORD_RECOVERY') {
+          setIsPasswordRecovery(true);
+        } else if (event === 'SIGNED_OUT') {
+          setIsPasswordRecovery(false);
+        }
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
-          const p = await fetchProfile();
-          setProfile(p);
+          setTimeout(() => {
+            if (!active) return;
+            fetchProfile().then((p) => {
+              if (active) setProfile(p);
+            });
+          }, 0);
         } else {
           setProfile(null);
         }
       }
     );
 
-    return () => subscription.unsubscribe();
+    // Get initial session
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!active || signingOutRef.current) return;
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        const p = await fetchProfile();
+        if (active) setProfile(p);
+      }
+      if (active) setLoading(false);
+    });
+
+    // Handle deep-link recovery URLs on native (web uses detectSessionInUrl: true)
+    let linkSubscription: { remove: () => void } | undefined;
+    if (Platform.OS !== 'web') {
+      const handleAuthUrl = async (url: string | null) => {
+        if (!url) return;
+        const hashPart = url.includes('#') ? url.split('#')[1] : '';
+        const queryPart = url.includes('?') ? url.split('?')[1].split('#')[0] : '';
+        const hashParams = new URLSearchParams(hashPart);
+        const queryParams = new URLSearchParams(queryPart);
+        const type = hashParams.get('type') ?? queryParams.get('type');
+        const code = queryParams.get('code');
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (!error && type === 'recovery') {
+            setIsPasswordRecovery(true);
+          }
+        } else if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (!error && type === 'recovery') {
+            setIsPasswordRecovery(true);
+          }
+        }
+      };
+
+      Linking.getInitialURL().then(handleAuthUrl).catch(() => {});
+      linkSubscription = Linking.addEventListener('url', ({ url }) => {
+        handleAuthUrl(url);
+      });
+    }
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+      linkSubscription?.remove();
+    };
   }, []);
 
   // Validate email domain
@@ -322,8 +388,10 @@ export function useAuth(): UseAuthReturn {
       return { error: null };
     }
 
+    const redirectTo = getPasswordResetRedirectUrl();
     const { error } = await supabase.auth.resetPasswordForEmail(
-      email.trim().toLowerCase()
+      email.trim().toLowerCase(),
+      redirectTo ? { redirectTo } : undefined
     );
 
     if (error) {
@@ -337,6 +405,7 @@ export function useAuth(): UseAuthReturn {
   const signOut = useCallback(async () => {
     signingOutRef.current = true;
     demoProfileStore = null;
+    setIsPasswordRecovery(false);
     setSession(null);
     setUser(null);
     setProfile(null);
@@ -349,6 +418,26 @@ export function useAuth(): UseAuthReturn {
     }
     signingOutRef.current = false;
   }, []);
+
+  const completePasswordRecovery = useCallback(async (newPassword: string): Promise<{ error: string | null }> => {
+    if (newPassword.length < 8) {
+      return { error: 'Password must be at least 8 characters.' };
+    }
+    if (DEMO_MODE) {
+      setIsPasswordRecovery(false);
+      return { error: null };
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) return { error: error.message };
+    setIsPasswordRecovery(false);
+    return { error: null };
+  }, []);
+
+  const cancelPasswordRecovery = useCallback(async () => {
+    setIsPasswordRecovery(false);
+    await signOut();
+  }, [signOut]);
 
   // Fetch user profile from DB
   const fetchProfile = useCallback(async (): Promise<UserProfile | null> => {
@@ -623,11 +712,14 @@ export function useAuth(): UseAuthReturn {
     user,
     profile,
     loading,
+    isPasswordRecovery,
     signUp,
     signIn,
     verifyOtp,
     resendOtp,
     resetPassword,
+    completePasswordRecovery,
+    cancelPasswordRecovery,
     signOut,
     createProfile,
     activateTutor,
